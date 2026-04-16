@@ -122,9 +122,21 @@ func Open() (*Vault, error) {
 	}
 
 	// Load master key from OS keychain
-	keyData, err := keychain.Load(keychainAccount(dir))
+	account := keychainAccount(dir)
+	keyData, err := keychain.Load(account)
 	if err != nil || len(keyData) != 32 {
-		return nil, fmt.Errorf("could not load master key from keychain: %v", err)
+		// Migrate: if old master.key file exists, move it to keychain
+		oldKeyPath := filepath.Join(dir, "master.key")
+		fileKey, fileErr := os.ReadFile(oldKeyPath)
+		if fileErr != nil || len(fileKey) != 32 {
+			return nil, fmt.Errorf("could not load master key from keychain: %v", err)
+		}
+		if err := keychain.Store(account, fileKey); err != nil {
+			return nil, fmt.Errorf("could not migrate master key to keychain: %w", err)
+		}
+		os.Remove(oldKeyPath)
+		keyData = fileKey
+		fmt.Println("Migrated master key from disk to OS keychain.")
 	}
 	v.masterKey = keyData
 

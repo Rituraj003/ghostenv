@@ -3,12 +3,30 @@ package keychain
 import (
 	"encoding/hex"
 	"fmt"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"runtime"
 	"strings"
 )
 
 const service = "ghostenv"
+
+// helperPath finds the ghostenv-keychain binary.
+// Checks next to the ghostenv binary first, then PATH.
+func helperPath() (string, error) {
+	// Check next to the current executable
+	exe, err := os.Executable()
+	if err == nil {
+		candidate := filepath.Join(filepath.Dir(exe), "ghostenv-keychain")
+		if _, err := os.Stat(candidate); err == nil {
+			return candidate, nil
+		}
+	}
+
+	// Check PATH
+	return exec.LookPath("ghostenv-keychain")
+}
 
 // Store saves the master key to the OS keychain.
 func Store(account string, key []byte) error {
@@ -16,17 +34,24 @@ func Store(account string, key []byte) error {
 
 	switch runtime.GOOS {
 	case "darwin":
-		// Delete existing entry first (ignore errors if not found)
-		exec.Command("security", "delete-generic-password", "-s", service, "-a", account).Run()
-		return exec.Command("security", "add-generic-password",
-			"-s", service, "-a", account, "-w", encoded,
-		).Run()
+		helper, err := helperPath()
+		if err != nil {
+			// Fall back to security command (no Touch ID)
+			return storeFallback(account, encoded)
+		}
+		out, err := exec.Command(helper, "store", account, encoded).CombinedOutput()
+		if err != nil {
+			return fmt.Errorf("keychain store failed: %s", strings.TrimSpace(string(out)))
+		}
+		return nil
 
 	case "linux":
-		return exec.Command("secret-tool", "store",
+		cmd := exec.Command("secret-tool", "store",
 			"--label", "ghostenv master key",
 			"service", service, "account", account,
-		).Run()
+		)
+		cmd.Stdin = strings.NewReader(encoded)
+		return cmd.Run()
 
 	default:
 		return fmt.Errorf("keychain not supported on %s", runtime.GOOS)
@@ -37,11 +62,14 @@ func Store(account string, key []byte) error {
 func Load(account string) ([]byte, error) {
 	switch runtime.GOOS {
 	case "darwin":
-		out, err := exec.Command("security", "find-generic-password",
-			"-s", service, "-a", account, "-w",
-		).Output()
+		helper, err := helperPath()
 		if err != nil {
-			return nil, fmt.Errorf("key not found in keychain")
+			// Fall back to security command (no Touch ID)
+			return loadFallback(account)
+		}
+		out, err := exec.Command(helper, "load", account).CombinedOutput()
+		if err != nil {
+			return nil, fmt.Errorf("keychain load failed: %s", strings.TrimSpace(string(out)))
 		}
 		return hex.DecodeString(strings.TrimSpace(string(out)))
 
@@ -63,12 +91,19 @@ func Load(account string) ([]byte, error) {
 func Delete(account string) error {
 	switch runtime.GOOS {
 	case "darwin":
-		return exec.Command("security", "delete-generic-password",
-			"-s", service, "-a", account,
-		).Run()
+		helper, err := helperPath()
+		if err != nil {
+			return exec.Command("security", "delete-generic-password",
+				"-s", service, "-a", account,
+			).Run()
+		}
+		out, err := exec.Command(helper, "delete", account).CombinedOutput()
+		if err != nil {
+			return fmt.Errorf("keychain delete failed: %s", strings.TrimSpace(string(out)))
+		}
+		return nil
 
 	case "linux":
-		// secret-tool doesn't have a direct delete; clear by storing empty
 		return exec.Command("secret-tool", "store",
 			"--label", "ghostenv master key (deleted)",
 			"service", service, "account", account,
@@ -77,4 +112,22 @@ func Delete(account string) error {
 	default:
 		return fmt.Errorf("keychain not supported on %s", runtime.GOOS)
 	}
+}
+
+// Fallback: plain security command (no Touch ID protection)
+func storeFallback(account, encoded string) error {
+	exec.Command("security", "delete-generic-password", "-s", service, "-a", account).Run()
+	return exec.Command("security", "add-generic-password",
+		"-s", service, "-a", account, "-w", encoded,
+	).Run()
+}
+
+func loadFallback(account string) ([]byte, error) {
+	out, err := exec.Command("security", "find-generic-password",
+		"-s", service, "-a", account, "-w",
+	).Output()
+	if err != nil {
+		return nil, fmt.Errorf("key not found in keychain")
+	}
+	return hex.DecodeString(strings.TrimSpace(string(out)))
 }
