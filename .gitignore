@@ -1,0 +1,15 @@
+# Binaries
+/ghostenv
+/dist/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+
+# OS
+.DS_Store
+
+# Never commit real secrets
+.env
+!.env.example
