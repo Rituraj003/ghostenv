@@ -21,7 +21,7 @@ jobs:
           go-version-file: go.mod
 
       - name: Run tests
-        run: go test ./...
+        run: GHOSTENV_NO_HELPER=1 go test ./...
 
       - name: Build Swift helper (macOS)
         run: |

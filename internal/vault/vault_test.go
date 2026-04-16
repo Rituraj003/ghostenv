@@ -27,13 +27,16 @@ func setupTestVault(t *testing.T) *Vault {
 		t.Skip("no keychain available")
 	}
 
+	// Skip Touch ID helper in tests
+	os.Setenv("GHOSTENV_NO_HELPER", "1")
+
 	dir := t.TempDir()
 	origDir, _ := os.Getwd()
 	os.Chdir(dir)
 	t.Cleanup(func() {
-		// Clean up keychain entry
 		account := keychainAccount(filepath.Join(dir, ".ghostenv"))
 		keychain.Delete(account)
+		os.Setenv("GHOSTENV_NO_HELPER", "")
 		os.Chdir(origDir)
 	})
 
@@ -48,6 +51,7 @@ func TestInitCreatesVaultDir(t *testing.T) {
 	if !hasKeychain() {
 		t.Skip("no keychain available")
 	}
+	os.Setenv("GHOSTENV_NO_HELPER", "1")
 
 	dir := t.TempDir()
 	origDir, _ := os.Getwd()
@@ -55,6 +59,7 @@ func TestInitCreatesVaultDir(t *testing.T) {
 	defer func() {
 		account := keychainAccount(filepath.Join(dir, ".ghostenv"))
 		keychain.Delete(account)
+		os.Setenv("GHOSTENV_NO_HELPER", "")
 		os.Chdir(origDir)
 	}()
 
@@ -78,6 +83,7 @@ func TestInitFailsIfAlreadyExists(t *testing.T) {
 	if !hasKeychain() {
 		t.Skip("no keychain available")
 	}
+	os.Setenv("GHOSTENV_NO_HELPER", "1")
 
 	dir := t.TempDir()
 	origDir, _ := os.Getwd()
@@ -85,6 +91,7 @@ func TestInitFailsIfAlreadyExists(t *testing.T) {
 	defer func() {
 		account := keychainAccount(filepath.Join(dir, ".ghostenv"))
 		keychain.Delete(account)
+		os.Setenv("GHOSTENV_NO_HELPER", "")
 		os.Chdir(origDir)
 	}()
 
@@ -129,6 +136,7 @@ func TestSaveAndReopen(t *testing.T) {
 	if !hasKeychain() {
 		t.Skip("no keychain available")
 	}
+	os.Setenv("GHOSTENV_NO_HELPER", "1")
 
 	dir := t.TempDir()
 	origDir, _ := os.Getwd()
@@ -136,6 +144,7 @@ func TestSaveAndReopen(t *testing.T) {
 	defer func() {
 		account := keychainAccount(filepath.Join(dir, ".ghostenv"))
 		keychain.Delete(account)
+		os.Setenv("GHOSTENV_NO_HELPER", "")
 		os.Chdir(origDir)
 	}()
 

@@ -14,7 +14,12 @@ const service = "ghostenv"
 
 // helperPath finds the ghostenv-keychain binary.
 // Checks next to the ghostenv binary first, then PATH.
+// Set GHOSTENV_NO_HELPER=1 to skip (used in tests).
 func helperPath() (string, error) {
+	if os.Getenv("GHOSTENV_NO_HELPER") == "1" {
+		return "", fmt.Errorf("helper disabled")
+	}
+
 	// Check next to the current executable
 	exe, err := os.Executable()
 	if err == nil {

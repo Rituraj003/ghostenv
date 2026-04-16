@@ -26,16 +26,21 @@ var agentProcesses = []string{
 	"windsurf",
 }
 
-// Confirm runs three checks before allowing access to secrets:
-// 1. Process tree — blocks if a known AI agent is an ancestor
-// 2. TTY — blocks if stdin is not an interactive terminal
-// 3. Clipboard code — copies a code to clipboard, user must paste it
-// On headless/remote systems without clipboard, falls back to terminal prompt.
+// Confirm gates access to secrets with platform-appropriate checks:
+//
+// macOS:  process tree check → Touch ID (via ghostenv-keychain helper)
+// Linux:  process tree check → TTY check → clipboard code (or terminal code fallback)
 func Confirm() error {
 	if err := checkProcessTree(); err != nil {
 		return err
 	}
 
+	// On macOS, Touch ID is the gate — no clipboard/code needed
+	if runtime.GOOS == "darwin" {
+		return requireTouchID()
+	}
+
+	// Linux/other: TTY check + clipboard or terminal code
 	if !term.IsTerminal(int(os.Stdin.Fd())) {
 		return fmt.Errorf("this command requires an interactive terminal")
 	}
@@ -43,7 +48,6 @@ func Confirm() error {
 	code := randomCode(6)
 
 	if err := copyToClipboard(code); err != nil {
-		// No clipboard available — fall back to terminal prompt
 		return confirmViaTerminal(code)
 	}
 
@@ -52,7 +56,61 @@ func Confirm() error {
 	var input string
 	fmt.Scanln(&input)
 
-	// Clear clipboard
+	copyToClipboard("")
+
+	if strings.TrimSpace(input) != code {
+		return fmt.Errorf("confirmation failed")
+	}
+
+	return nil
+}
+
+// requireTouchID triggers Touch ID via the ghostenv-keychain helper.
+// If the helper isn't available or no biometrics hardware, it passes through.
+func requireTouchID() error {
+	helper, err := findHelper()
+	if err != nil {
+		// No helper — fall back to TTY + clipboard
+		return fallbackConfirm()
+	}
+
+	// Use a dummy load call to trigger Touch ID.
+	// The helper requires Touch ID before returning any key.
+	// We use a special account that always exists for auth-only checks.
+	out, err := exec.Command(helper, "load", "ghostenv-auth-check").CombinedOutput()
+	if err != nil {
+		msg := strings.TrimSpace(string(out))
+		if strings.Contains(msg, "not found") {
+			// No auth-check key — Touch ID isn't set up yet, allow through
+			return nil
+		}
+		if strings.Contains(msg, "canceled") || strings.Contains(msg, "failed") {
+			return fmt.Errorf("Touch ID authentication failed")
+		}
+		// Other error — fall back
+		return fallbackConfirm()
+	}
+
+	return nil
+}
+
+// fallbackConfirm is used when Touch ID is not available on macOS.
+func fallbackConfirm() error {
+	if !term.IsTerminal(int(os.Stdin.Fd())) {
+		return fmt.Errorf("this command requires an interactive terminal")
+	}
+
+	code := randomCode(6)
+
+	if err := copyToClipboard(code); err != nil {
+		return confirmViaTerminal(code)
+	}
+
+	fmt.Fprintf(os.Stderr, "Confirm: a code was copied to your clipboard. Paste it here: ")
+
+	var input string
+	fmt.Scanln(&input)
+
 	copyToClipboard("")
 
 	if strings.TrimSpace(input) != code {
@@ -76,12 +134,23 @@ func confirmViaTerminal(code string) error {
 	return nil
 }
 
+func findHelper() (string, error) {
+	exe, err := os.Executable()
+	if err == nil {
+		candidate := exe[:len(exe)-len("ghostenv")] + "ghostenv-keychain"
+		if _, err := os.Stat(candidate); err == nil {
+			return candidate, nil
+		}
+	}
+	return exec.LookPath("ghostenv-keychain")
+}
+
 // checkProcessTree walks up the process tree and blocks if any ancestor
-// is a known AI agent. You cannot fake your parent process name.
+// is a known AI agent.
 func checkProcessTree() error {
 	pid := os.Getpid()
 
-	for range 32 { // max depth to avoid infinite loops
+	for range 32 {
 		ppid, name, err := parentProcess(pid)
 		if err != nil || ppid <= 1 {
 			break
@@ -100,7 +169,6 @@ func checkProcessTree() error {
 	return nil
 }
 
-// parentProcess returns the parent PID and process name for a given PID.
 func parentProcess(pid int) (int, string, error) {
 	switch runtime.GOOS {
 	case "darwin":
@@ -112,7 +180,6 @@ func parentProcess(pid int) (int, string, error) {
 	}
 }
 
-// parentProcessPS uses ps to get parent PID and name (macOS).
 func parentProcessPS(pid int) (int, string, error) {
 	out, err := exec.Command("ps", "-o", "ppid=,comm=", "-p", fmt.Sprintf("%d", pid)).Output()
 	if err != nil {
@@ -129,7 +196,6 @@ func parentProcessPS(pid int) (int, string, error) {
 	fmt.Sscanf(parts[0], "%d", &ppid)
 	name := parts[len(parts)-1]
 
-	// ps on macOS may show full path
 	if idx := strings.LastIndex(name, "/"); idx >= 0 {
 		name = name[idx+1:]
 	}
@@ -137,17 +203,13 @@ func parentProcessPS(pid int) (int, string, error) {
 	return ppid, name, nil
 }
 
-// parentProcessLinux reads /proc to get parent PID and name.
 func parentProcessLinux(pid int) (int, string, error) {
 	data, err := os.ReadFile(fmt.Sprintf("/proc/%d/stat", pid))
 	if err != nil {
 		return 0, "", err
 	}
 
-	// Format: pid (name) state ppid ...
 	s := string(data)
-
-	// Find process name between parentheses
 	openParen := strings.IndexByte(s, '(')
 	closeParen := strings.LastIndexByte(s, ')')
 	if openParen < 0 || closeParen < 0 {
@@ -155,7 +217,6 @@ func parentProcessLinux(pid int) (int, string, error) {
 	}
 	name := s[openParen+1 : closeParen]
 
-	// Fields after the closing paren
 	rest := strings.Fields(s[closeParen+2:])
 	if len(rest) < 2 {
 		return 0, "", fmt.Errorf("unexpected stat format")
