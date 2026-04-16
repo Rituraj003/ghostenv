@@ -34,6 +34,8 @@ func helperPath() (string, error) {
 }
 
 // Store saves the master key to the OS keychain or GPG.
+// On macOS, always uses the security CLI with -A flag so any process can read
+// without prompting. Touch ID protection is enforced on Load, not Store.
 func Store(account string, key []byte, vaultDir string) error {
 	encoded := hex.EncodeToString(key)
 
@@ -43,15 +45,7 @@ func Store(account string, key []byte, vaultDir string) error {
 
 	switch runtime.GOOS {
 	case "darwin":
-		helper, err := helperPath()
-		if err != nil {
-			return storeFallback(account, encoded)
-		}
-		out, err := exec.Command(helper, "store", account, encoded).CombinedOutput()
-		if err != nil {
-			return fmt.Errorf("keychain store failed: %s", strings.TrimSpace(string(out)))
-		}
-		return nil
+		return storeFallback(account, encoded)
 
 	case "linux":
 		cmd := exec.Command("secret-tool", "store",
@@ -132,6 +126,7 @@ func Delete(account string, vaultDir string) error {
 // Fallback: plain security command (no Touch ID protection)
 func storeFallback(account, encoded string) error {
 	exec.Command("security", "delete-generic-password", "-s", service, "-a", account).Run()
+	// -A allows any application to access without prompting
 	return exec.Command("security", "add-generic-password",
 		"-s", service, "-a", account, "-w", encoded, "-A",
 	).Run()
