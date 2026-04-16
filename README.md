@@ -6,21 +6,31 @@ ghostenv locks your `.env` secrets in an encrypted vault and replaces them with 
 
 ## How it works
 
-1. Your real secrets get encrypted and stored in a local vault (`~/.ghostenv/`)
+1. Your real secrets get encrypted and stored in a per-project vault (`.ghostenv/`)
 2. Your `.env` file gets replaced with fake values like `gv_YZXELQYXBPKJNIX2`
-3. When you run a command through `ghostenv exec`, real secrets are injected into that process only — they never touch your shell environment
+3. When you run a command through `ghostenv run`, real secrets are injected into that process only — they never touch your shell environment
 
 ## Install
 
+**Homebrew** (macOS/Linux):
 ```bash
-go install github.com/ghostenv/ghostenv/cmd/ghostenv@latest
+brew install Rituraj003/tap/ghostenv
+```
+
+**Binary release** (macOS/Linux/Windows):
+
+Download from [GitHub Releases](https://github.com/Rituraj003/ghostenv/releases).
+
+**From source:**
+```bash
+go install github.com/Rituraj003/ghostenv/cmd/ghostenv@latest
 ```
 
 ## Quick start
 
 ```bash
 # Lock up your .env secrets
-ghostenv init .env
+ghostenv init
 
 # Your .env now contains masked values — safe for AI agents to read
 cat .env
@@ -28,8 +38,8 @@ cat .env
 # GITHUB_TOKEN=gv_X73CCW5SRWTUU22C
 
 # Run commands with real secrets injected
-ghostenv exec -- npm publish
-ghostenv exec -- gh pr create
+ghostenv run npm publish
+ghostenv run gh pr create
 ```
 
 ## Commands
@@ -41,14 +51,31 @@ ghostenv exec -- gh pr create
 | `ghostenv show [key]` | View real secret values |
 | `ghostenv set KEY VALUE` | Add or update a secret |
 | `ghostenv edit` | Edit all secrets in your `$EDITOR` |
-| `ghostenv exec -- CMD` | Run a command with real secrets injected |
+| `ghostenv remove KEY` | Remove a secret from the vault |
+| `ghostenv run CMD` | Run a command with real secrets injected |
+| `ghostenv diff` | Show differences between vault and masked `.env` |
+| `ghostenv exec -- CMD` | Same as `run`, with explicit `--` separator |
+
+## Shell completions
+
+```bash
+# Zsh
+ghostenv completion zsh >> ~/.zshrc
+
+# Bash
+ghostenv completion bash >> ~/.bashrc
+
+# Fish
+ghostenv completion fish > ~/.config/fish/completions/ghostenv.fish
+```
 
 ## Security model
 
 - Secrets are encrypted at rest with AES-256-GCM
 - Real values never exist in your shell environment
-- `ghostenv exec` injects secrets into the child process only — they disappear when the process exits
+- `ghostenv run` injects secrets into the child process only — they disappear when the process exits
 - Masked values are deterministic (stable across sessions) but not reversible
+- Each project has its own isolated vault
 
 ## License
 
