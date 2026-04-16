@@ -155,6 +155,18 @@ func Open() (*Vault, error) {
 	return v, nil
 }
 
+// Destroy removes the vault directory and its keychain entry.
+func Destroy() {
+	cwd, err := os.Getwd()
+	if err != nil {
+		return
+	}
+	dir := filepath.Join(cwd, ".ghostenv")
+	account := keychainAccount(dir)
+	keychain.Delete(account)
+	os.RemoveAll(dir)
+}
+
 // Exists returns true if a vault exists in the current directory or any parent.
 func Exists() bool {
 	return findProjectDir() != ""

@@ -56,7 +56,9 @@ var initCmd = &cobra.Command{
 			return fmt.Errorf("vault already exists. Use --force to reimport, or 'ghostenv set' to update individual secrets")
 		}
 		if vault.ExistsInCwd() && forceInit {
-			v, err = vault.Open()
+			// Destroy old vault and create fresh
+			vault.Destroy()
+			v, err = vault.Init()
 		} else {
 			v, err = vault.Init()
 		}
