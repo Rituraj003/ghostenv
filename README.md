@@ -69,10 +69,16 @@ ghostenv completion bash >> ~/.bashrc
 ghostenv completion fish > ~/.config/fish/completions/ghostenv.fish
 ```
 
+## Key storage
+
+The vault master key is stored in the OS keychain (macOS) or via `secret-tool` (Linux). On Linux, if `secret-tool` is unavailable, ghostenv falls back to GPG automatically.
+
+Force GPG with `GHOSTENV_BACKEND=gpg`. Set `GHOSTENV_GPG_KEY` to pick a specific GPG key.
+
 ## Security model
 
 - Secrets are encrypted at rest with AES-256-GCM
-- Real values never exist in your shell environment
+- Master key never stored in plaintext
 - `ghostenv run` injects secrets into the child process only — they disappear when the process exits
 - Masked values are deterministic (stable across sessions) but not reversible
 - Each project has its own isolated vault

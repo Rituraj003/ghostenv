@@ -35,7 +35,7 @@ func setupTestVault(t *testing.T) *Vault {
 	os.Chdir(dir)
 	t.Cleanup(func() {
 		account := keychainAccount(filepath.Join(dir, ".ghostenv"))
-		keychain.Delete(account)
+		keychain.Delete(account, filepath.Join(dir, ".ghostenv"))
 		os.Setenv("GHOSTENV_NO_HELPER", "")
 		os.Chdir(origDir)
 	})
@@ -58,7 +58,7 @@ func TestInitCreatesVaultDir(t *testing.T) {
 	os.Chdir(dir)
 	defer func() {
 		account := keychainAccount(filepath.Join(dir, ".ghostenv"))
-		keychain.Delete(account)
+		keychain.Delete(account, filepath.Join(dir, ".ghostenv"))
 		os.Setenv("GHOSTENV_NO_HELPER", "")
 		os.Chdir(origDir)
 	}()
@@ -90,7 +90,7 @@ func TestInitFailsIfAlreadyExists(t *testing.T) {
 	os.Chdir(dir)
 	defer func() {
 		account := keychainAccount(filepath.Join(dir, ".ghostenv"))
-		keychain.Delete(account)
+		keychain.Delete(account, filepath.Join(dir, ".ghostenv"))
 		os.Setenv("GHOSTENV_NO_HELPER", "")
 		os.Chdir(origDir)
 	}()
@@ -143,7 +143,7 @@ func TestSaveAndReopen(t *testing.T) {
 	os.Chdir(dir)
 	defer func() {
 		account := keychainAccount(filepath.Join(dir, ".ghostenv"))
-		keychain.Delete(account)
+		keychain.Delete(account, filepath.Join(dir, ".ghostenv"))
 		os.Setenv("GHOSTENV_NO_HELPER", "")
 		os.Chdir(origDir)
 	}()

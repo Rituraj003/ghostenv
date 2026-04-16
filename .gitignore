@@ -18,3 +18,4 @@
 # Never commit real secrets
 .env
 !.env.example
+CLAUDE.md

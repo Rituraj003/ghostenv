@@ -100,7 +100,7 @@ func Init() (*Vault, error) {
 	if _, err := io.ReadFull(rand.Reader, v.masterKey); err != nil {
 		return nil, fmt.Errorf("could not generate master key: %w", err)
 	}
-	if err := keychain.Store(keychainAccount(dir), v.masterKey); err != nil {
+	if err := keychain.Store(keychainAccount(dir), v.masterKey, dir); err != nil {
 		return nil, fmt.Errorf("could not save master key to keychain: %w", err)
 	}
 
@@ -123,7 +123,7 @@ func Open() (*Vault, error) {
 
 	// Load master key from OS keychain
 	account := keychainAccount(dir)
-	keyData, err := keychain.Load(account)
+	keyData, err := keychain.Load(account, dir)
 	if err != nil || len(keyData) != 32 {
 		// Migrate: if old master.key file exists, move it to keychain
 		oldKeyPath := filepath.Join(dir, "master.key")
@@ -131,7 +131,7 @@ func Open() (*Vault, error) {
 		if fileErr != nil || len(fileKey) != 32 {
 			return nil, fmt.Errorf("could not load master key from keychain: %v", err)
 		}
-		if err := keychain.Store(account, fileKey); err != nil {
+		if err := keychain.Store(account, fileKey, dir); err != nil {
 			return nil, fmt.Errorf("could not migrate master key to keychain: %w", err)
 		}
 		os.Remove(oldKeyPath)
@@ -163,7 +163,7 @@ func Destroy() {
 	}
 	dir := filepath.Join(cwd, ".ghostenv")
 	account := keychainAccount(dir)
-	keychain.Delete(account)
+	keychain.Delete(account, dir)
 	os.RemoveAll(dir)
 }
 

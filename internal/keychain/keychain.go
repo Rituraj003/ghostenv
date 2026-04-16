@@ -33,15 +33,18 @@ func helperPath() (string, error) {
 	return exec.LookPath("ghostenv-keychain")
 }
 
-// Store saves the master key to the OS keychain.
-func Store(account string, key []byte) error {
+// Store saves the master key to the OS keychain or GPG.
+func Store(account string, key []byte, vaultDir string) error {
 	encoded := hex.EncodeToString(key)
+
+	if useGPG() {
+		return gpgStore(vaultDir, encoded)
+	}
 
 	switch runtime.GOOS {
 	case "darwin":
 		helper, err := helperPath()
 		if err != nil {
-			// Fall back to security command (no Touch ID)
 			return storeFallback(account, encoded)
 		}
 		out, err := exec.Command(helper, "store", account, encoded).CombinedOutput()
@@ -63,13 +66,16 @@ func Store(account string, key []byte) error {
 	}
 }
 
-// Load retrieves the master key from the OS keychain.
-func Load(account string) ([]byte, error) {
+// Load retrieves the master key from the OS keychain or GPG.
+func Load(account string, vaultDir string) ([]byte, error) {
+	if useGPG() {
+		return gpgLoad(vaultDir)
+	}
+
 	switch runtime.GOOS {
 	case "darwin":
 		helper, err := helperPath()
 		if err != nil {
-			// Fall back to security command (no Touch ID)
 			return loadFallback(account)
 		}
 		out, err := exec.Command(helper, "load", account).CombinedOutput()
@@ -92,8 +98,12 @@ func Load(account string) ([]byte, error) {
 	}
 }
 
-// Delete removes the master key from the OS keychain.
-func Delete(account string) error {
+// Delete removes the master key from the OS keychain or GPG.
+func Delete(account string, vaultDir string) error {
+	if useGPG() {
+		return gpgDelete(vaultDir)
+	}
+
 	switch runtime.GOOS {
 	case "darwin":
 		helper, err := helperPath()
@@ -122,7 +132,6 @@ func Delete(account string) error {
 // Fallback: plain security command (no Touch ID protection)
 func storeFallback(account, encoded string) error {
 	exec.Command("security", "delete-generic-password", "-s", service, "-a", account).Run()
-	// -A allows any application to access without prompting
 	return exec.Command("security", "add-generic-password",
 		"-s", service, "-a", account, "-w", encoded, "-A",
 	).Run()
