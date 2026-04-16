@@ -4,6 +4,7 @@ import (
 	"crypto/aes"
 	"crypto/cipher"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -11,6 +12,8 @@ import (
 	"path/filepath"
 	"sort"
 	"time"
+
+	"github.com/ghostenv/ghostenv/internal/keychain"
 )
 
 // Secret holds a secret value and metadata.
@@ -61,6 +64,12 @@ func findProjectDir() string {
 	return ""
 }
 
+// keychainAccount returns a unique keychain account name for a vault directory.
+func keychainAccount(dir string) string {
+	h := sha256.Sum256([]byte(dir))
+	return fmt.Sprintf("ghostenv-%x", h[:8])
+}
+
 // Init creates a new vault in the current directory.
 // Returns an error if a vault already exists here.
 func Init() (*Vault, error) {
@@ -86,13 +95,13 @@ func Init() (*Vault, error) {
 		secrets:    make(map[string]Secret),
 	}
 
-	// Generate master key
+	// Generate master key and store in OS keychain
 	v.masterKey = make([]byte, 32)
 	if _, err := io.ReadFull(rand.Reader, v.masterKey); err != nil {
 		return nil, fmt.Errorf("could not generate master key: %w", err)
 	}
-	if err := os.WriteFile(filepath.Join(dir, "master.key"), v.masterKey, 0600); err != nil {
-		return nil, fmt.Errorf("could not save master key: %w", err)
+	if err := keychain.Store(keychainAccount(dir), v.masterKey); err != nil {
+		return nil, fmt.Errorf("could not save master key to keychain: %w", err)
 	}
 
 	return v, nil
@@ -112,11 +121,10 @@ func Open() (*Vault, error) {
 		secrets:    make(map[string]Secret),
 	}
 
-	// Load master key
-	keyPath := filepath.Join(dir, "master.key")
-	keyData, err := os.ReadFile(keyPath)
+	// Load master key from OS keychain
+	keyData, err := keychain.Load(keychainAccount(dir))
 	if err != nil || len(keyData) != 32 {
-		return nil, fmt.Errorf("could not read master key")
+		return nil, fmt.Errorf("could not load master key from keychain: %v", err)
 	}
 	v.masterKey = keyData
 

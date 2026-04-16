@@ -2,16 +2,40 @@ package vault
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
 	"testing"
+
+	"github.com/ghostenv/ghostenv/internal/keychain"
 )
+
+func hasKeychain() bool {
+	switch runtime.GOOS {
+	case "darwin":
+		return exec.Command("security", "help").Run() == nil
+	case "linux":
+		_, err := exec.LookPath("secret-tool")
+		return err == nil
+	}
+	return false
+}
 
 func setupTestVault(t *testing.T) *Vault {
 	t.Helper()
+	if !hasKeychain() {
+		t.Skip("no keychain available")
+	}
+
 	dir := t.TempDir()
 	origDir, _ := os.Getwd()
 	os.Chdir(dir)
-	t.Cleanup(func() { os.Chdir(origDir) })
+	t.Cleanup(func() {
+		// Clean up keychain entry
+		account := keychainAccount(filepath.Join(dir, ".ghostenv"))
+		keychain.Delete(account)
+		os.Chdir(origDir)
+	})
 
 	v, err := Init()
 	if err != nil {
@@ -21,10 +45,18 @@ func setupTestVault(t *testing.T) *Vault {
 }
 
 func TestInitCreatesVaultDir(t *testing.T) {
+	if !hasKeychain() {
+		t.Skip("no keychain available")
+	}
+
 	dir := t.TempDir()
 	origDir, _ := os.Getwd()
 	os.Chdir(dir)
-	defer os.Chdir(origDir)
+	defer func() {
+		account := keychainAccount(filepath.Join(dir, ".ghostenv"))
+		keychain.Delete(account)
+		os.Chdir(origDir)
+	}()
 
 	_, err := Init()
 	if err != nil {
@@ -35,16 +67,26 @@ func TestInitCreatesVaultDir(t *testing.T) {
 	if _, err := os.Stat(ghostDir); os.IsNotExist(err) {
 		t.Error(".ghostenv directory was not created")
 	}
-	if _, err := os.Stat(filepath.Join(ghostDir, "master.key")); os.IsNotExist(err) {
-		t.Error("master.key was not created")
+
+	// master.key should NOT exist on disk anymore
+	if _, err := os.Stat(filepath.Join(ghostDir, "master.key")); err == nil {
+		t.Error("master.key should not be on disk — key should be in keychain")
 	}
 }
 
 func TestInitFailsIfAlreadyExists(t *testing.T) {
+	if !hasKeychain() {
+		t.Skip("no keychain available")
+	}
+
 	dir := t.TempDir()
 	origDir, _ := os.Getwd()
 	os.Chdir(dir)
-	defer os.Chdir(origDir)
+	defer func() {
+		account := keychainAccount(filepath.Join(dir, ".ghostenv"))
+		keychain.Delete(account)
+		os.Chdir(origDir)
+	}()
 
 	_, err := Init()
 	if err != nil {
@@ -84,10 +126,18 @@ func TestSetGetDelete(t *testing.T) {
 }
 
 func TestSaveAndReopen(t *testing.T) {
+	if !hasKeychain() {
+		t.Skip("no keychain available")
+	}
+
 	dir := t.TempDir()
 	origDir, _ := os.Getwd()
 	os.Chdir(dir)
-	defer os.Chdir(origDir)
+	defer func() {
+		account := keychainAccount(filepath.Join(dir, ".ghostenv"))
+		keychain.Delete(account)
+		os.Chdir(origDir)
+	}()
 
 	v, err := Init()
 	if err != nil {
