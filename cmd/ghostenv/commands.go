@@ -131,7 +131,7 @@ var showCmd = &cobra.Command{
 	Long:  "Shows real secret values. Specify a key to show one, or omit to show all.",
 	Args:  cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		if err := guard.RequireTTY(); err != nil {
+		if err := guard.Confirm(); err != nil {
 			return err
 		}
 
@@ -216,7 +216,7 @@ var editCmd = &cobra.Command{
 	Use:   "edit",
 	Short: "Edit all secrets in your editor",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		if err := guard.RequireTTY(); err != nil {
+		if err := guard.Confirm(); err != nil {
 			return err
 		}
 
@@ -248,7 +248,7 @@ var execCmd = &cobra.Command{
 	Long:               "Runs a command with the real secret values set as environment variables. Secrets only exist in the child process.",
 	DisableFlagParsing: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		if err := guard.RequireTTY(); err != nil {
+		if err := guard.Confirm(); err != nil {
 			return err
 		}
 
@@ -276,7 +276,7 @@ var runCmd = &cobra.Command{
 	Long:               "Shorthand for 'ghostenv exec'. Runs a command with real secrets as environment variables.",
 	DisableFlagParsing: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		if err := guard.RequireTTY(); err != nil {
+		if err := guard.Confirm(); err != nil {
 			return err
 		}
 
