@@ -5,6 +5,7 @@ import (
 	"os"
 
 	"github.com/ghostenv/ghostenv/internal/envfile"
+	"github.com/ghostenv/ghostenv/internal/guard"
 	"github.com/ghostenv/ghostenv/internal/mask"
 	"github.com/ghostenv/ghostenv/internal/runner"
 	"github.com/ghostenv/ghostenv/internal/vault"
@@ -130,6 +131,10 @@ var showCmd = &cobra.Command{
 	Long:  "Shows real secret values. Specify a key to show one, or omit to show all.",
 	Args:  cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
+		if err := guard.RequireTTY(); err != nil {
+			return err
+		}
+
 		v, err := vault.Open()
 		if err != nil {
 			return err
@@ -211,6 +216,10 @@ var editCmd = &cobra.Command{
 	Use:   "edit",
 	Short: "Edit all secrets in your editor",
 	RunE: func(cmd *cobra.Command, args []string) error {
+		if err := guard.RequireTTY(); err != nil {
+			return err
+		}
+
 		v, err := vault.Open()
 		if err != nil {
 			return err
@@ -239,6 +248,10 @@ var execCmd = &cobra.Command{
 	Long:               "Runs a command with the real secret values set as environment variables. Secrets only exist in the child process.",
 	DisableFlagParsing: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
+		if err := guard.RequireTTY(); err != nil {
+			return err
+		}
+
 		// Strip leading "--" if present
 		if len(args) > 0 && args[0] == "--" {
 			args = args[1:]
@@ -263,6 +276,10 @@ var runCmd = &cobra.Command{
 	Long:               "Shorthand for 'ghostenv exec'. Runs a command with real secrets as environment variables.",
 	DisableFlagParsing: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
+		if err := guard.RequireTTY(); err != nil {
+			return err
+		}
+
 		if len(args) == 0 {
 			return fmt.Errorf("usage: ghostenv run COMMAND [ARGS...]")
 		}
