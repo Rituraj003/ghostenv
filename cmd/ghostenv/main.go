@@ -35,6 +35,8 @@ func init() {
 	rootCmd.AddCommand(editCmd)
 	rootCmd.AddCommand(removeCmd)
 	rootCmd.AddCommand(execCmd)
+	rootCmd.AddCommand(runCmd)
+	rootCmd.AddCommand(diffCmd)
 }
 
 func main() {

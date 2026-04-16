@@ -257,6 +257,84 @@ var execCmd = &cobra.Command{
 	},
 }
 
+var runCmd = &cobra.Command{
+	Use:                "run COMMAND [ARGS...]",
+	Short:              "Run a command with real secrets injected",
+	Long:               "Shorthand for 'ghostenv exec'. Runs a command with real secrets as environment variables.",
+	DisableFlagParsing: true,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		if len(args) == 0 {
+			return fmt.Errorf("usage: ghostenv run COMMAND [ARGS...]")
+		}
+
+		v, err := vault.Open()
+		if err != nil {
+			return err
+		}
+
+		env := v.EnvMap()
+		return runner.Exec(args[0], args[1:], env)
+	},
+}
+
+var diffCmd = &cobra.Command{
+	Use:   "diff",
+	Short: "Show differences between vault and masked .env",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		v, err := vault.Open()
+		if err != nil {
+			return err
+		}
+
+		envFile := v.EnvFile()
+		if envFile == "" {
+			return fmt.Errorf("no .env file configured. Run 'ghostenv init' first")
+		}
+
+		// Parse current .env file
+		filePairs, err := envfile.Parse(envFile)
+		if err != nil {
+			return fmt.Errorf("could not read %s: %w", envFile, err)
+		}
+
+		fileKeys := make(map[string]bool)
+		for _, kv := range filePairs {
+			fileKeys[kv.Key] = true
+		}
+
+		vaultKeys := make(map[string]bool)
+		for _, info := range v.List() {
+			vaultKeys[info.Key] = true
+		}
+
+		changes := 0
+
+		// Keys in vault but not in .env
+		for key := range vaultKeys {
+			if !fileKeys[key] {
+				fmt.Printf("  + %-30s (in vault, missing from %s)\n", key, envFile)
+				changes++
+			}
+		}
+
+		// Keys in .env but not in vault
+		for _, kv := range filePairs {
+			if !vaultKeys[kv.Key] {
+				fmt.Printf("  - %-30s (in %s, missing from vault)\n", kv.Key, envFile)
+				changes++
+			}
+		}
+
+		if changes == 0 {
+			fmt.Println("Vault and masked .env are in sync.")
+		} else {
+			fmt.Printf("\n%d difference(s) found. Run 'ghostenv set' or 'ghostenv remove' to fix.\n", changes)
+		}
+
+		return nil
+	},
+}
+
 // regenMaskedEnv regenerates the masked .env file from the current vault state.
 func regenMaskedEnv(v *vault.Vault) error {
 	envFile := v.EnvFile()
