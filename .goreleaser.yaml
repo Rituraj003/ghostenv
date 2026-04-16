@@ -1,10 +1,26 @@
 version: 2
 
 builds:
-  - main: ./cmd/ghostenv
+  - id: ghostenv
+    main: ./cmd/ghostenv
     binary: ghostenv
     ldflags:
       - -s -w -X main.version={{.Version}}
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+      - windows
+    goarch:
+      - amd64
+      - arm64
+
+  - id: ghostenv-mcp
+    main: ./cmd/ghostenv-mcp
+    binary: ghostenv-mcp
+    ldflags:
+      - -s -w
     env:
       - CGO_ENABLED=0
     goos:
@@ -47,4 +63,5 @@ brews:
     description: "Keep secrets away from AI agents"
     install: |
       bin.install "ghostenv"
+      bin.install "ghostenv-mcp"
       bin.install "ghostenv-keychain" if File.exist? "ghostenv-keychain"
