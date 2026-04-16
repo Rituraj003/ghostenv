@@ -58,3 +58,18 @@ func Run(name string, args []string, secrets map[string]string) error {
 
 	return cmd.Run()
 }
+
+// RunCapture runs a command with secrets injected and captures stdout+stderr.
+// Used by the MCP server to return output to the agent.
+func RunCapture(name string, args []string, secrets map[string]string) (string, error) {
+	cmd := exec.Command(name, args...)
+
+	// Build env
+	cmd.Env = os.Environ()
+	for key, val := range secrets {
+		cmd.Env = append(cmd.Env, key+"="+val)
+	}
+
+	out, err := cmd.CombinedOutput()
+	return string(out), err
+}

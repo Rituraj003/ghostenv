@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"os"
 
+	"os/exec"
+
 	"github.com/ghostenv/ghostenv/internal/envfile"
 	"github.com/ghostenv/ghostenv/internal/guard"
 	"github.com/ghostenv/ghostenv/internal/mask"
@@ -410,4 +412,33 @@ func splitLines(s string) []string {
 		lines = append(lines, s[start:])
 	}
 	return lines
+}
+
+var mcpCmd = &cobra.Command{
+	Use:   "mcp",
+	Short: "Start the MCP server",
+	Long:  "Starts the ghostenv MCP server for AI agent integration. Communicates over stdio using JSON-RPC.",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		// Find the ghostenv-mcp binary
+		exe, err := os.Executable()
+		if err != nil {
+			return err
+		}
+
+		mcpBin := exe + "-mcp"
+		if _, err := os.Stat(mcpBin); os.IsNotExist(err) {
+			// Try PATH
+			mcpBin, err = exec.LookPath("ghostenv-mcp")
+			if err != nil {
+				return fmt.Errorf("ghostenv-mcp binary not found. Build it with: go build -o ghostenv-mcp ./cmd/ghostenv-mcp/")
+			}
+		}
+
+		// Exec into the MCP server
+		mcpCmd := exec.Command(mcpBin)
+		mcpCmd.Stdin = os.Stdin
+		mcpCmd.Stdout = os.Stdout
+		mcpCmd.Stderr = os.Stderr
+		return mcpCmd.Run()
+	},
 }
