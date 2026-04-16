@@ -33,6 +33,7 @@ func init() {
 	rootCmd.AddCommand(showCmd)
 	rootCmd.AddCommand(setCmd)
 	rootCmd.AddCommand(editCmd)
+	rootCmd.AddCommand(removeCmd)
 	rootCmd.AddCommand(execCmd)
 }
 

@@ -3,7 +3,6 @@ package main
 import (
 	"fmt"
 	"os"
-	"strings"
 
 	"github.com/ghostenv/ghostenv/internal/envfile"
 	"github.com/ghostenv/ghostenv/internal/mask"
@@ -12,6 +11,8 @@ import (
 
 	"github.com/spf13/cobra"
 )
+
+var forceInit bool
 
 var initCmd = &cobra.Command{
 	Use:   "init [envfile]",
@@ -34,31 +35,65 @@ var initCmd = &cobra.Command{
 			return nil
 		}
 
+		// Check if file is already masked
+		maskedCount := 0
+		for _, kv := range pairs {
+			if mask.IsMasked(kv.Value) {
+				maskedCount++
+			}
+		}
+		if maskedCount == len(pairs) {
+			return fmt.Errorf("%s is already masked. Nothing to import", path)
+		}
+		if maskedCount > 0 {
+			fmt.Printf("Warning: %d of %d values look already masked, importing the rest.\n", maskedCount, len(pairs))
+		}
+
 		// Open or create vault
-		v, err := vault.Open()
+		var v *vault.Vault
+		if vault.ExistsInCwd() && !forceInit {
+			return fmt.Errorf("vault already exists. Use --force to reimport, or 'ghostenv set' to update individual secrets")
+		}
+		if vault.ExistsInCwd() && forceInit {
+			v, err = vault.Open()
+		} else {
+			v, err = vault.Init()
+		}
 		if err != nil {
 			return fmt.Errorf("could not open vault: %w", err)
 		}
 
-		// Store each secret
+		// Store each non-masked secret
+		imported := 0
 		for _, kv := range pairs {
-			v.Set(kv.Key, kv.Value)
+			if !mask.IsMasked(kv.Value) {
+				v.Set(kv.Key, kv.Value)
+				imported++
+			}
 		}
+
+		v.SetEnvFile(path)
 		if err := v.Save(); err != nil {
 			return fmt.Errorf("could not save vault: %w", err)
 		}
 
 		// Generate masked .env
-		masked := mask.Generate(v.MasterKey(), pairs)
-		if err := os.WriteFile(path, []byte(masked), 0644); err != nil {
-			return fmt.Errorf("could not write masked %s: %w", path, err)
+		if err := regenMaskedEnv(v); err != nil {
+			return fmt.Errorf("could not write masked env: %w", err)
 		}
 
-		fmt.Printf("Locked %d secrets from %s\n", len(pairs), path)
+		// Add .ghostenv/ to .gitignore if not already there
+		addToGitignore(".ghostenv/")
+
+		fmt.Printf("Locked %d secrets from %s\n", imported, path)
 		fmt.Println("Original values are now in the vault.")
 		fmt.Println("The .env file now contains masked (fake) values.")
 		return nil
 	},
+}
+
+func init() {
+	initCmd.Flags().BoolVar(&forceInit, "force", false, "Reimport even if vault already exists")
 }
 
 var statusCmd = &cobra.Command{
@@ -67,7 +102,7 @@ var statusCmd = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		v, err := vault.Open()
 		if err != nil {
-			return fmt.Errorf("could not open vault: %w", err)
+			return err
 		}
 
 		secrets := v.List()
@@ -79,6 +114,11 @@ var statusCmd = &cobra.Command{
 		fmt.Printf("Vault: %d secrets stored\n\n", len(secrets))
 		for _, s := range secrets {
 			fmt.Printf("  %-30s (set %s)\n", s.Key, s.Age)
+		}
+
+		envFile := v.EnvFile()
+		if envFile != "" {
+			fmt.Printf("\nMasked env: %s\n", envFile)
 		}
 		return nil
 	},
@@ -92,7 +132,7 @@ var showCmd = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		v, err := vault.Open()
 		if err != nil {
-			return fmt.Errorf("could not open vault: %w", err)
+			return err
 		}
 
 		if len(args) == 1 {
@@ -120,7 +160,7 @@ var setCmd = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		v, err := vault.Open()
 		if err != nil {
-			return fmt.Errorf("could not open vault: %w", err)
+			return err
 		}
 
 		v.Set(args[0], args[1])
@@ -128,7 +168,41 @@ var setCmd = &cobra.Command{
 			return fmt.Errorf("could not save vault: %w", err)
 		}
 
+		if err := regenMaskedEnv(v); err != nil {
+			return fmt.Errorf("could not update masked env: %w", err)
+		}
+
 		fmt.Printf("Updated %s\n", args[0])
+		return nil
+	},
+}
+
+var removeCmd = &cobra.Command{
+	Use:     "remove KEY",
+	Aliases: []string{"rm"},
+	Short:   "Remove a secret from the vault",
+	Args:    cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		v, err := vault.Open()
+		if err != nil {
+			return err
+		}
+
+		key := args[0]
+		if !v.Has(key) {
+			return fmt.Errorf("secret %q not found", key)
+		}
+
+		v.Delete(key)
+		if err := v.Save(); err != nil {
+			return fmt.Errorf("could not save vault: %w", err)
+		}
+
+		if err := regenMaskedEnv(v); err != nil {
+			return fmt.Errorf("could not update masked env: %w", err)
+		}
+
+		fmt.Printf("Removed %s\n", key)
 		return nil
 	},
 }
@@ -139,7 +213,7 @@ var editCmd = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		v, err := vault.Open()
 		if err != nil {
-			return fmt.Errorf("could not open vault: %w", err)
+			return err
 		}
 
 		updated, err := v.EditInTerminal()
@@ -148,6 +222,9 @@ var editCmd = &cobra.Command{
 		}
 
 		if updated {
+			if err := regenMaskedEnv(v); err != nil {
+				return fmt.Errorf("could not update masked env: %w", err)
+			}
 			fmt.Println("Secrets updated.")
 		} else {
 			fmt.Println("No changes.")
@@ -172,7 +249,7 @@ var execCmd = &cobra.Command{
 
 		v, err := vault.Open()
 		if err != nil {
-			return fmt.Errorf("could not open vault: %w", err)
+			return err
 		}
 
 		env := v.EnvMap()
@@ -180,10 +257,60 @@ var execCmd = &cobra.Command{
 	},
 }
 
-// Helper to format key=value pairs for display
-func formatEnvLine(key, value string) string {
-	if strings.Contains(value, " ") || strings.Contains(value, "\"") {
-		return fmt.Sprintf("%s=%q", key, value)
+// regenMaskedEnv regenerates the masked .env file from the current vault state.
+func regenMaskedEnv(v *vault.Vault) error {
+	envFile := v.EnvFile()
+	if envFile == "" {
+		return nil
 	}
-	return fmt.Sprintf("%s=%s", key, value)
+
+	pairs := v.Pairs()
+	var kvs []envfile.KeyValue
+	for _, p := range pairs {
+		kvs = append(kvs, envfile.KeyValue{Key: p.Key, Value: p.Value})
+	}
+
+	masked := mask.Generate(v.MasterKey(), kvs)
+	return os.WriteFile(envFile, []byte(masked), 0644)
+}
+
+// addToGitignore adds an entry to .gitignore if not already present.
+func addToGitignore(entry string) {
+	path := ".gitignore"
+	content, err := os.ReadFile(path)
+	if err != nil {
+		// No .gitignore, create one
+		os.WriteFile(path, []byte(entry+"\n"), 0644)
+		return
+	}
+
+	// Check if already present
+	lines := string(content)
+	for _, line := range splitLines(lines) {
+		if line == entry {
+			return
+		}
+	}
+
+	// Append
+	if len(content) > 0 && content[len(content)-1] != '\n' {
+		content = append(content, '\n')
+	}
+	content = append(content, []byte(entry+"\n")...)
+	os.WriteFile(path, content, 0644)
+}
+
+func splitLines(s string) []string {
+	var lines []string
+	start := 0
+	for i := 0; i < len(s); i++ {
+		if s[i] == '\n' {
+			lines = append(lines, s[start:i])
+			start = i + 1
+		}
+	}
+	if start < len(s) {
+		lines = append(lines, s[start:])
+	}
+	return lines
 }

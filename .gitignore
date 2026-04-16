@@ -10,6 +10,9 @@
 # OS
 .DS_Store
 
+# Vault data (per-project)
+.ghostenv/
+
 # Never commit real secrets
 .env
 !.env.example

@@ -20,7 +20,7 @@ func Generate(masterKey []byte, pairs []envfile.KeyValue) string {
 	b.WriteString("# Run 'ghostenv show' to view real values.\n\n")
 
 	for _, kv := range pairs {
-		ghostVal := ghostValue(masterKey, kv.Key, kv.Value)
+		ghostVal := GhostValue(masterKey, kv.Key, kv.Value)
 		b.WriteString(kv.Key)
 		b.WriteByte('=')
 		b.WriteString(ghostVal)
@@ -30,9 +30,14 @@ func Generate(masterKey []byte, pairs []envfile.KeyValue) string {
 	return b.String()
 }
 
-// ghostValue produces a deterministic, non-reversible masked value.
+// IsMasked returns true if a value looks like a ghostenv masked value.
+func IsMasked(value string) bool {
+	return strings.HasPrefix(value, "gv_")
+}
+
+// GhostValue produces a deterministic, non-reversible masked value.
 // Format: gv_ + 16 chars of base32(HMAC-SHA256(masterKey, key || ":" || value))
-func ghostValue(masterKey []byte, key, value string) string {
+func GhostValue(masterKey []byte, key, value string) string {
 	mac := hmac.New(sha256.New, masterKey)
 	mac.Write([]byte(key))
 	mac.Write([]byte(":"))
