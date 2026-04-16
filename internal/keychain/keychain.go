@@ -122,8 +122,9 @@ func Delete(account string) error {
 // Fallback: plain security command (no Touch ID protection)
 func storeFallback(account, encoded string) error {
 	exec.Command("security", "delete-generic-password", "-s", service, "-a", account).Run()
+	// -A allows any application to access without prompting
 	return exec.Command("security", "add-generic-password",
-		"-s", service, "-a", account, "-w", encoded,
+		"-s", service, "-a", account, "-w", encoded, "-A",
 	).Run()
 }
 
