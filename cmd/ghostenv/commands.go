@@ -334,16 +334,13 @@ func runWithSecrets(bin string, args []string, injectAll bool) error {
 	allSecrets := v.EnvMap()
 	var injected map[string]string
 
-	if injectAll {
-		if agentMode {
-			return fmt.Errorf("--all is not allowed in agent mode")
-		}
-		injected = allSecrets
-	} else {
-		injected, err = scopeSecrets(v, bin, args, agentMode)
+	if agentMode && !injectAll {
+		injected, err = scopeSecrets(v, bin, args)
 		if err != nil {
 			return err
 		}
+	} else {
+		injected = allSecrets
 	}
 
 	// Agent mode: capture output and scrub secrets
@@ -362,31 +359,20 @@ func runWithSecrets(bin string, args []string, injectAll bool) error {
 	return runner.Exec(bin, args, injected)
 }
 
-// scopeSecrets returns the secrets to inject based on the policy.
-// In strict mode (agent), returns an error if no policy match is found.
-// In loose mode (human), warns and returns all secrets.
-func scopeSecrets(v *vault.Vault, bin string, args []string, strict bool) (map[string]string, error) {
-	all := v.EnvMap()
-
+// scopeSecrets enforces the policy allowlist (agent mode only).
+// Returns an error if no policy exists or no rule matches.
+func scopeSecrets(v *vault.Vault, bin string, args []string) (map[string]string, error) {
 	pol, err := policy.Load(v.Dir())
 	if err != nil || pol.IsEmpty() {
-		if strict {
-			return nil, fmt.Errorf("no policy file found. Run 'ghostenv init' or 'ghostenv policy add' to create one")
-		}
-		fmt.Fprintf(os.Stderr, "warning: no policy file found, injecting all secrets. Run 'ghostenv init' to generate one.\n")
-		return all, nil
+		return nil, fmt.Errorf("no policy file found. Run 'ghostenv init' or 'ghostenv policy add' to create one")
 	}
 
 	rule, matched := pol.Match(bin, args)
 	if !matched {
-		if strict {
-			return nil, fmt.Errorf("command %q is not in the policy allowlist. Run: ghostenv policy add %q", bin, bin+" "+strings.Join(args, " "))
-		}
-		fmt.Fprintf(os.Stderr, "warning: no policy rule matched %q, injecting all secrets.\n", bin)
-		return all, nil
+		return nil, fmt.Errorf("command %q is not in the policy allowlist. Run: ghostenv policy add %q", bin, bin+" "+strings.Join(args, " "))
 	}
 
-	return rule.FilterSecrets(all), nil
+	return rule.FilterSecrets(v.EnvMap()), nil
 }
 
 var diffCmd = &cobra.Command{
