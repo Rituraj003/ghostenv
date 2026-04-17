@@ -3,35 +3,12 @@ package keychain
 import (
 	"encoding/hex"
 	"fmt"
-	"os"
 	"os/exec"
-	"path/filepath"
 	"runtime"
 	"strings"
 )
 
 const service = "ghostenv"
-
-// helperPath finds the ghostenv-keychain binary.
-// Checks next to the ghostenv binary first, then PATH.
-// Set GHOSTENV_NO_HELPER=1 to skip (used in tests).
-func helperPath() (string, error) {
-	if os.Getenv("GHOSTENV_NO_HELPER") == "1" {
-		return "", fmt.Errorf("helper disabled")
-	}
-
-	// Check next to the current executable
-	exe, err := os.Executable()
-	if err == nil {
-		candidate := filepath.Join(filepath.Dir(exe), "ghostenv-keychain")
-		if _, err := os.Stat(candidate); err == nil {
-			return candidate, nil
-		}
-	}
-
-	// Check PATH
-	return exec.LookPath("ghostenv-keychain")
-}
 
 // Store saves the master key to the OS keychain or GPG.
 // On macOS, always uses the security CLI with -A flag so any process can read
@@ -61,6 +38,8 @@ func Store(account string, key []byte, vaultDir string) error {
 }
 
 // Load retrieves the master key from the OS keychain or GPG.
+// On macOS, always uses the security CLI for consistency with Store.
+// Touch ID authentication is handled separately by the guard package.
 func Load(account string, vaultDir string) ([]byte, error) {
 	if useGPG() {
 		return gpgLoad(vaultDir)
@@ -68,15 +47,7 @@ func Load(account string, vaultDir string) ([]byte, error) {
 
 	switch runtime.GOOS {
 	case "darwin":
-		helper, err := helperPath()
-		if err != nil {
-			return loadFallback(account)
-		}
-		out, err := exec.Command(helper, "load", account).CombinedOutput()
-		if err != nil {
-			return nil, fmt.Errorf("keychain load failed: %s", strings.TrimSpace(string(out)))
-		}
-		return hex.DecodeString(strings.TrimSpace(string(out)))
+		return loadFallback(account)
 
 	case "linux":
 		out, err := exec.Command("secret-tool", "lookup",
@@ -100,17 +71,9 @@ func Delete(account string, vaultDir string) error {
 
 	switch runtime.GOOS {
 	case "darwin":
-		helper, err := helperPath()
-		if err != nil {
-			return exec.Command("security", "delete-generic-password",
-				"-s", service, "-a", account,
-			).Run()
-		}
-		out, err := exec.Command(helper, "delete", account).CombinedOutput()
-		if err != nil {
-			return fmt.Errorf("keychain delete failed: %s", strings.TrimSpace(string(out)))
-		}
-		return nil
+		return exec.Command("security", "delete-generic-password",
+			"-s", service, "-a", account,
+		).Run()
 
 	case "linux":
 		return exec.Command("secret-tool", "store",
