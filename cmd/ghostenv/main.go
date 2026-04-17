@@ -37,6 +37,8 @@ func init() {
 	rootCmd.AddCommand(execCmd)
 	rootCmd.AddCommand(runCmd)
 	rootCmd.AddCommand(diffCmd)
+	rootCmd.AddCommand(restoreCmd)
+	rootCmd.AddCommand(policyCmd)
 	rootCmd.AddCommand(mcpCmd)
 }
 

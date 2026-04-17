@@ -1,9 +1,7 @@
 package guard
 
 import (
-	"crypto/rand"
 	"fmt"
-	"math/big"
 	"os"
 	"os/exec"
 	"runtime"
@@ -11,8 +9,6 @@ import (
 
 	"golang.org/x/term"
 )
-
-const codeChars = "abcdefghjkmnpqrstuvwxyz23456789"
 
 // Known AI agent process names.
 var agentProcesses = []string{
@@ -28,109 +24,54 @@ var agentProcesses = []string{
 
 // Confirm gates access to secrets with platform-appropriate checks:
 //
-// macOS:  process tree check → Touch ID (via ghostenv-keychain helper)
-// Linux:  process tree check → TTY check → clipboard code (or terminal code fallback)
+// All:    process tree check (hard block if AI agent detected)
+// macOS:  Touch ID (via ghostenv-keychain helper), or pass through (security CLI prompts)
+// Linux:  TTY check + "Press Enter" confirmation
 func Confirm() error {
 	if err := checkProcessTree(); err != nil {
 		return err
 	}
 
-	// On macOS, Touch ID is the gate — no clipboard/code needed
 	if runtime.GOOS == "darwin" {
-		return requireTouchID()
+		return confirmDarwin()
 	}
 
-	// Linux/other: TTY check + clipboard or terminal code
-	if !term.IsTerminal(int(os.Stdin.Fd())) {
-		return fmt.Errorf("this command requires an interactive terminal")
-	}
-
-	code := randomCode(6)
-
-	if err := copyToClipboard(code); err != nil {
-		return confirmViaTerminal(code)
-	}
-
-	fmt.Fprintf(os.Stderr, "Confirm: a code was copied to your clipboard. Paste it here: ")
-
-	var input string
-	fmt.Scanln(&input)
-
-	copyToClipboard("")
-
-	if strings.TrimSpace(input) != code {
-		return fmt.Errorf("confirmation failed")
-	}
-
-	return nil
+	return confirmLinux()
 }
 
-// requireTouchID triggers Touch ID via the ghostenv-keychain helper.
-// If the helper isn't available or no biometrics hardware, it passes through.
-func requireTouchID() error {
+// confirmDarwin uses Touch ID if the helper is available.
+// Without the helper, the macOS security CLI already prompts the user
+// via a system dialog on keychain access, so no additional gate is needed.
+func confirmDarwin() error {
 	helper, err := findHelper()
 	if err != nil {
-		// No helper — fall back to TTY + clipboard
-		return fallbackConfirm()
+		return nil
 	}
 
-	// Use a dummy load call to trigger Touch ID.
-	// The helper requires Touch ID before returning any key.
-	// We use a special account that always exists for auth-only checks.
 	out, err := exec.Command(helper, "load", "ghostenv-auth-check").CombinedOutput()
 	if err != nil {
 		msg := strings.TrimSpace(string(out))
 		if strings.Contains(msg, "not found") {
-			// No auth-check key — Touch ID isn't set up yet, allow through
 			return nil
 		}
 		if strings.Contains(msg, "canceled") || strings.Contains(msg, "failed") {
 			return fmt.Errorf("Touch ID authentication failed")
 		}
-		// Other error — fall back
-		return fallbackConfirm()
+		return nil
 	}
 
 	return nil
 }
 
-// fallbackConfirm is used when Touch ID is not available on macOS.
-func fallbackConfirm() error {
+// confirmLinux requires an interactive terminal and a simple Enter press.
+func confirmLinux() error {
 	if !term.IsTerminal(int(os.Stdin.Fd())) {
 		return fmt.Errorf("this command requires an interactive terminal")
 	}
 
-	code := randomCode(6)
-
-	if err := copyToClipboard(code); err != nil {
-		return confirmViaTerminal(code)
-	}
-
-	fmt.Fprintf(os.Stderr, "Confirm: a code was copied to your clipboard. Paste it here: ")
-
+	fmt.Fprintf(os.Stderr, "Press Enter to continue with secrets: ")
 	var input string
 	fmt.Scanln(&input)
-
-	copyToClipboard("")
-
-	if strings.TrimSpace(input) != code {
-		return fmt.Errorf("confirmation failed")
-	}
-
-	return nil
-}
-
-// confirmViaTerminal shows the code in the terminal (fallback for headless systems).
-func confirmViaTerminal(code string) error {
-	fmt.Fprintf(os.Stderr, "Confirm: type %q to continue: ", code)
-
-	var input string
-	fmt.Scanln(&input)
-
-	if strings.TrimSpace(input) != code {
-		return fmt.Errorf("confirmation failed")
-	}
-
 	return nil
 }
 
@@ -226,34 +167,4 @@ func parentProcessLinux(pid int) (int, string, error) {
 	fmt.Sscanf(rest[1], "%d", &ppid)
 
 	return ppid, name, nil
-}
-
-func copyToClipboard(text string) error {
-	var cmd *exec.Cmd
-	switch runtime.GOOS {
-	case "darwin":
-		cmd = exec.Command("pbcopy")
-	case "linux":
-		if _, err := exec.LookPath("xclip"); err == nil {
-			cmd = exec.Command("xclip", "-selection", "clipboard")
-		} else if _, err := exec.LookPath("xsel"); err == nil {
-			cmd = exec.Command("xsel", "--clipboard", "--input")
-		} else {
-			return fmt.Errorf("no clipboard command available")
-		}
-	default:
-		return fmt.Errorf("clipboard not supported on %s", runtime.GOOS)
-	}
-
-	cmd.Stdin = strings.NewReader(text)
-	return cmd.Run()
-}
-
-func randomCode(length int) string {
-	b := make([]byte, length)
-	for i := range b {
-		n, _ := rand.Int(rand.Reader, big.NewInt(int64(len(codeChars))))
-		b[i] = codeChars[n.Int64()]
-	}
-	return string(b)
 }

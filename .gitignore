@@ -1,7 +1,6 @@
 # Binaries
 /ghostenv
 /ghostenv-keychain
-/ghostenv-mcp
 /dist/
 
 # IDE

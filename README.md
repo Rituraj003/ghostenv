@@ -53,8 +53,13 @@ ghostenv run gh pr create
 | `ghostenv edit` | Edit all secrets in your `$EDITOR` |
 | `ghostenv remove KEY` | Remove a secret from the vault |
 | `ghostenv run CMD` | Run a command with real secrets injected |
+| `ghostenv run --all CMD` | Run a command, injecting all secrets (ignore policy) |
+| `ghostenv restore` | Write real secrets back to `.env` (undo masking) |
 | `ghostenv diff` | Show differences between vault and masked `.env` |
 | `ghostenv exec -- CMD` | Same as `run`, with explicit `--` separator |
+| `ghostenv policy show` | Show the current policy allowlist |
+| `ghostenv policy init` | Generate a starter policy from installed tools |
+| `ghostenv mcp` | Start the MCP server for AI agent integration |
 
 ## Shell completions
 
@@ -69,6 +74,23 @@ ghostenv completion bash >> ~/.bashrc
 ghostenv completion fish > ~/.config/fish/completions/ghostenv.fish
 ```
 
+## Policy
+
+ghostenv uses a policy file (`.ghostenv/policy.yaml`) to control which commands receive which secrets. A starter policy is auto-generated during `ghostenv init` based on tools found in your PATH.
+
+```yaml
+allow:
+  - command: "npm publish"
+    inject: [NPM_TOKEN]
+  - command: "gh *"
+    inject: [GITHUB_TOKEN]
+  - command: "docker push *"
+    inject: all
+```
+
+- **CLI**: `ghostenv run` uses the policy for per-secret scoping. If no rule matches, all secrets are injected with a warning. Use `--all` to bypass.
+- **MCP server**: Strict enforcement. Commands not in the policy are rejected.
+
 ## Key storage
 
 The vault master key is stored in the OS keychain (macOS) or via `secret-tool` (Linux). On Linux, if `secret-tool` is unavailable, ghostenv falls back to GPG automatically.
@@ -80,6 +102,9 @@ Force GPG with `GHOSTENV_BACKEND=gpg`. Set `GHOSTENV_GPG_KEY` to pick a specific
 - Secrets are encrypted at rest with AES-256-GCM
 - Master key never stored in plaintext
 - `ghostenv run` injects secrets into the child process only — they disappear when the process exits
+- Policy allowlist controls which commands can receive which secrets
+- MCP server scrubs command output for leaked secrets (including base64/hex/URL-encoded forms)
+- Process tree scanning blocks access when an AI agent is detected as a parent process
 - Masked values are deterministic (stable across sessions) but not reversible
 - Each project has its own isolated vault
 

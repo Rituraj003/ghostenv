@@ -183,6 +183,11 @@ func ExistsInCwd() bool {
 	return err == nil && info.IsDir()
 }
 
+// Dir returns the vault directory path.
+func (v *Vault) Dir() string {
+	return v.dir
+}
+
 // MasterKey returns the vault's master key (used for masking).
 func (v *Vault) MasterKey() []byte {
 	return v.masterKey

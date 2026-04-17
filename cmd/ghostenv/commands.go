@@ -3,12 +3,13 @@ package main
 import (
 	"fmt"
 	"os"
-
-	"os/exec"
+	"strings"
 
 	"github.com/ghostenv/ghostenv/internal/envfile"
 	"github.com/ghostenv/ghostenv/internal/guard"
 	"github.com/ghostenv/ghostenv/internal/mask"
+	mcpserver "github.com/ghostenv/ghostenv/internal/mcp"
+	"github.com/ghostenv/ghostenv/internal/policy"
 	"github.com/ghostenv/ghostenv/internal/runner"
 	"github.com/ghostenv/ghostenv/internal/vault"
 
@@ -45,20 +46,24 @@ var initCmd = &cobra.Command{
 				maskedCount++
 			}
 		}
-		if maskedCount == len(pairs) {
+		if maskedCount == len(pairs) && !forceInit {
 			return fmt.Errorf("%s is already masked. Nothing to import", path)
 		}
-		if maskedCount > 0 {
+		if maskedCount > 0 && !forceInit {
 			fmt.Printf("Warning: %d of %d values look already masked, importing the rest.\n", maskedCount, len(pairs))
 		}
 
 		// Open or create vault
 		var v *vault.Vault
+		var oldSecrets map[string]string
 		if vault.ExistsInCwd() && !forceInit {
 			return fmt.Errorf("vault already exists. Use --force to reimport, or 'ghostenv set' to update individual secrets")
 		}
 		if vault.ExistsInCwd() && forceInit {
-			// Destroy old vault and create fresh
+			// Try to preserve existing secrets from old vault
+			if oldVault, err := vault.Open(); err == nil {
+				oldSecrets = oldVault.EnvMap()
+			}
 			vault.Destroy()
 			v, err = vault.Init()
 		} else {
@@ -68,7 +73,12 @@ var initCmd = &cobra.Command{
 			return fmt.Errorf("could not open vault: %w", err)
 		}
 
-		// Store each non-masked secret
+		// Restore old secrets first
+		for key, val := range oldSecrets {
+			v.Set(key, val)
+		}
+
+		// Import new non-masked secrets from .env (overrides old ones)
 		imported := 0
 		for _, kv := range pairs {
 			if !mask.IsMasked(kv.Value) {
@@ -89,6 +99,16 @@ var initCmd = &cobra.Command{
 
 		// Add .ghostenv/ to .gitignore if not already there
 		addToGitignore(".ghostenv/")
+
+		// Generate starter policy if tools are detected
+		starter := policy.GenerateStarter()
+		if !starter.IsEmpty() {
+			if err := starter.Save(v.Dir()); err != nil {
+				fmt.Fprintf(os.Stderr, "Warning: could not write policy.yaml: %v\n", err)
+			} else {
+				fmt.Printf("Generated policy with %d rules (see .ghostenv/policy.yaml)\n", len(starter.Allow))
+			}
+		}
 
 		fmt.Printf("Locked %d secrets from %s\n", imported, path)
 		fmt.Println("Original values are now in the vault.")
@@ -260,6 +280,14 @@ var execCmd = &cobra.Command{
 		if len(args) > 0 && args[0] == "--" {
 			args = args[1:]
 		}
+
+		// Check for --all flag
+		injectAll := false
+		if len(args) > 0 && args[0] == "--all" {
+			injectAll = true
+			args = args[1:]
+		}
+
 		if len(args) == 0 {
 			return fmt.Errorf("usage: ghostenv exec -- COMMAND [ARGS...]")
 		}
@@ -269,7 +297,7 @@ var execCmd = &cobra.Command{
 			return err
 		}
 
-		env := v.EnvMap()
+		env := scopeSecrets(v, args[0], args[1:], injectAll)
 		return runner.Exec(args[0], args[1:], env)
 	},
 }
@@ -277,11 +305,18 @@ var execCmd = &cobra.Command{
 var runCmd = &cobra.Command{
 	Use:                "run COMMAND [ARGS...]",
 	Short:              "Run a command with real secrets injected",
-	Long:               "Shorthand for 'ghostenv exec'. Runs a command with real secrets as environment variables.",
+	Long:               "Shorthand for 'ghostenv exec'. Runs a command with real secrets as environment variables.\nUse --all to inject all secrets regardless of policy.",
 	DisableFlagParsing: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if err := guard.Confirm(); err != nil {
 			return err
+		}
+
+		// Check for --all flag
+		injectAll := false
+		if len(args) > 0 && args[0] == "--all" {
+			injectAll = true
+			args = args[1:]
 		}
 
 		if len(args) == 0 {
@@ -293,9 +328,34 @@ var runCmd = &cobra.Command{
 			return err
 		}
 
-		env := v.EnvMap()
+		env := scopeSecrets(v, args[0], args[1:], injectAll)
 		return runner.Exec(args[0], args[1:], env)
 	},
+}
+
+// scopeSecrets returns the secrets to inject based on the policy.
+// If forceAll is true or no policy exists, returns all secrets.
+func scopeSecrets(v *vault.Vault, bin string, args []string, forceAll bool) map[string]string {
+	all := v.EnvMap()
+
+	if forceAll {
+		return all
+	}
+
+	pol, err := policy.Load(v.Dir())
+	if err != nil || pol.IsEmpty() {
+		// No policy — inject all with warning
+		fmt.Fprintf(os.Stderr, "warning: no policy file found, injecting all secrets. Run 'ghostenv init' to generate one.\n")
+		return all
+	}
+
+	rule, matched := pol.Match(bin, args)
+	if !matched {
+		fmt.Fprintf(os.Stderr, "warning: no policy rule matched %q, injecting all secrets.\n", bin)
+		return all
+	}
+
+	return rule.FilterSecrets(all)
 }
 
 var diffCmd = &cobra.Command{
@@ -419,26 +479,174 @@ var mcpCmd = &cobra.Command{
 	Short: "Start the MCP server",
 	Long:  "Starts the ghostenv MCP server for AI agent integration. Communicates over stdio using JSON-RPC.",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		// Find the ghostenv-mcp binary
-		exe, err := os.Executable()
+		return mcpserver.Run()
+	},
+}
+
+var restoreStdout bool
+
+var restoreCmd = &cobra.Command{
+	Use:   "restore",
+	Short: "Restore real secrets to the .env file",
+	Long:  "Writes real secret values back to the .env file, replacing the masked values.",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		if err := guard.Confirm(); err != nil {
+			return err
+		}
+
+		v, err := vault.Open()
 		if err != nil {
 			return err
 		}
 
-		mcpBin := exe + "-mcp"
-		if _, err := os.Stat(mcpBin); os.IsNotExist(err) {
-			// Try PATH
-			mcpBin, err = exec.LookPath("ghostenv-mcp")
-			if err != nil {
-				return fmt.Errorf("ghostenv-mcp binary not found. Build it with: go build -o ghostenv-mcp ./cmd/ghostenv-mcp/")
-			}
+		pairs := v.Pairs()
+		var kvs []envfile.KeyValue
+		for _, p := range pairs {
+			kvs = append(kvs, envfile.KeyValue{Key: p.Key, Value: p.Value})
+		}
+		content := envfile.Format(kvs)
+
+		if restoreStdout {
+			fmt.Print(content)
+			return nil
 		}
 
-		// Exec into the MCP server
-		mcpCmd := exec.Command(mcpBin)
-		mcpCmd.Stdin = os.Stdin
-		mcpCmd.Stdout = os.Stdout
-		mcpCmd.Stderr = os.Stderr
-		return mcpCmd.Run()
+		envFile := v.EnvFile()
+		if envFile == "" {
+			return fmt.Errorf("no .env file configured. Run 'ghostenv init' first")
+		}
+
+		if err := os.WriteFile(envFile, []byte(content), 0644); err != nil {
+			return err
+		}
+
+		fmt.Printf("Restored %d secrets to %s\n", len(pairs), envFile)
+		return nil
 	},
+}
+
+func init() {
+	restoreCmd.Flags().BoolVar(&restoreStdout, "stdout", false, "Print to stdout instead of writing to file")
+}
+
+var policyCmd = &cobra.Command{
+	Use:   "policy",
+	Short: "Manage the secrets policy",
+	Run: func(cmd *cobra.Command, args []string) {
+		cmd.Help()
+	},
+}
+
+var policyShowCmd = &cobra.Command{
+	Use:   "show",
+	Short: "Show the current policy",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		v, err := vault.Open()
+		if err != nil {
+			return err
+		}
+
+		pol, err := policy.Load(v.Dir())
+		if err != nil {
+			return fmt.Errorf("could not load policy: %w", err)
+		}
+
+		fmt.Print(pol.Format())
+		return nil
+	},
+}
+
+var policyInitCmd = &cobra.Command{
+	Use:   "init",
+	Short: "Generate a starter policy based on installed tools",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		v, err := vault.Open()
+		if err != nil {
+			return err
+		}
+
+		starter := policy.GenerateStarter()
+		if starter.IsEmpty() {
+			fmt.Println("No known tools detected in PATH. Create .ghostenv/policy.yaml manually.")
+			return nil
+		}
+
+		if err := starter.Save(v.Dir()); err != nil {
+			return fmt.Errorf("could not write policy: %w", err)
+		}
+
+		fmt.Printf("Generated policy with %d rules:\n", len(starter.Allow))
+		fmt.Print(starter.Format())
+		return nil
+	},
+}
+
+var policyAddCmd = &cobra.Command{
+	Use:   "add COMMAND [KEY...]",
+	Short: "Add a command to the policy allowlist",
+	Long:  "Adds a command pattern to the policy. Specify secret key names to inject, or omit for 'all'.\nExample: ghostenv policy add \"npm publish\" NPM_TOKEN",
+	Args:  cobra.MinimumNArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		v, err := vault.Open()
+		if err != nil {
+			return err
+		}
+
+		command := args[0]
+		inject := []string{"all"}
+		if len(args) > 1 {
+			inject = args[1:]
+		}
+
+		pol, err := policy.Load(v.Dir())
+		if err != nil {
+			return fmt.Errorf("could not load policy: %w", err)
+		}
+
+		if err := pol.Add(command, inject); err != nil {
+			return err
+		}
+
+		if err := pol.Save(v.Dir()); err != nil {
+			return fmt.Errorf("could not save policy: %w", err)
+		}
+
+		fmt.Printf("Added: %s -> %s\n", command, strings.Join(inject, ", "))
+		return nil
+	},
+}
+
+var policyRemoveCmd = &cobra.Command{
+	Use:   "remove COMMAND",
+	Short: "Remove a command from the policy allowlist",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		v, err := vault.Open()
+		if err != nil {
+			return err
+		}
+
+		pol, err := policy.Load(v.Dir())
+		if err != nil {
+			return fmt.Errorf("could not load policy: %w", err)
+		}
+
+		if !pol.Remove(args[0]) {
+			return fmt.Errorf("no rule found for %q", args[0])
+		}
+
+		if err := pol.Save(v.Dir()); err != nil {
+			return fmt.Errorf("could not save policy: %w", err)
+		}
+
+		fmt.Printf("Removed: %s\n", args[0])
+		return nil
+	},
+}
+
+func init() {
+	policyCmd.AddCommand(policyShowCmd)
+	policyCmd.AddCommand(policyInitCmd)
+	policyCmd.AddCommand(policyAddCmd)
+	policyCmd.AddCommand(policyRemoveCmd)
 }
