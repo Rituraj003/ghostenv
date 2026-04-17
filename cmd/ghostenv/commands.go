@@ -8,9 +8,9 @@ import (
 	"github.com/ghostenv/ghostenv/internal/envfile"
 	"github.com/ghostenv/ghostenv/internal/guard"
 	"github.com/ghostenv/ghostenv/internal/mask"
-	mcpserver "github.com/ghostenv/ghostenv/internal/mcp"
 	"github.com/ghostenv/ghostenv/internal/policy"
 	"github.com/ghostenv/ghostenv/internal/runner"
+	"github.com/ghostenv/ghostenv/internal/scrub"
 	"github.com/ghostenv/ghostenv/internal/vault"
 
 	"github.com/spf13/cobra"
@@ -272,10 +272,6 @@ var execCmd = &cobra.Command{
 	Long:               "Runs a command with the real secret values set as environment variables. Secrets only exist in the child process.",
 	DisableFlagParsing: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		if err := guard.Confirm(); err != nil {
-			return err
-		}
-
 		// Strip leading "--" if present
 		if len(args) > 0 && args[0] == "--" {
 			args = args[1:]
@@ -292,26 +288,16 @@ var execCmd = &cobra.Command{
 			return fmt.Errorf("usage: ghostenv exec -- COMMAND [ARGS...]")
 		}
 
-		v, err := vault.Open()
-		if err != nil {
-			return err
-		}
-
-		env := scopeSecrets(v, args[0], args[1:], injectAll)
-		return runner.Exec(args[0], args[1:], env)
+		return runWithSecrets(args[0], args[1:], injectAll)
 	},
 }
 
 var runCmd = &cobra.Command{
 	Use:                "run COMMAND [ARGS...]",
 	Short:              "Run a command with real secrets injected",
-	Long:               "Shorthand for 'ghostenv exec'. Runs a command with real secrets as environment variables.\nUse --all to inject all secrets regardless of policy.",
+	Long:               "Runs a command with real secrets as environment variables.\nUse --all to inject all secrets regardless of policy.\n\nWhen called from an AI agent, policy is strictly enforced and output is scrubbed.",
 	DisableFlagParsing: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		if err := guard.Confirm(); err != nil {
-			return err
-		}
-
 		// Check for --all flag
 		injectAll := false
 		if len(args) > 0 && args[0] == "--all" {
@@ -323,39 +309,84 @@ var runCmd = &cobra.Command{
 			return fmt.Errorf("usage: ghostenv run COMMAND [ARGS...]")
 		}
 
-		v, err := vault.Open()
-		if err != nil {
-			return err
-		}
-
-		env := scopeSecrets(v, args[0], args[1:], injectAll)
-		return runner.Exec(args[0], args[1:], env)
+		return runWithSecrets(args[0], args[1:], injectAll)
 	},
 }
 
-// scopeSecrets returns the secrets to inject based on the policy.
-// If forceAll is true or no policy exists, returns all secrets.
-func scopeSecrets(v *vault.Vault, bin string, args []string, forceAll bool) map[string]string {
-	all := v.EnvMap()
+// runWithSecrets handles both human and agent execution modes.
+//
+// Human mode: prompt for confirmation, loose policy (warn if no match), syscall.Exec
+// Agent mode: no prompt, strict policy enforcement, capture + scrub output
+func runWithSecrets(bin string, args []string, injectAll bool) error {
+	agentMode := guard.IsAgent()
 
-	if forceAll {
-		return all
+	if !agentMode {
+		if err := guard.Confirm(); err != nil {
+			return err
+		}
 	}
+
+	v, err := vault.Open()
+	if err != nil {
+		return err
+	}
+
+	allSecrets := v.EnvMap()
+	var injected map[string]string
+
+	if injectAll {
+		if agentMode {
+			return fmt.Errorf("--all is not allowed in agent mode")
+		}
+		injected = allSecrets
+	} else {
+		injected, err = scopeSecrets(v, bin, args, agentMode)
+		if err != nil {
+			return err
+		}
+	}
+
+	// Agent mode: capture output and scrub secrets
+	if agentMode {
+		output, runErr := runner.RunCapture(bin, args, injected)
+		// Scrub against ALL secrets, not just injected ones
+		output = scrub.Output(output, allSecrets)
+		fmt.Print(output)
+		if runErr != nil {
+			return fmt.Errorf("command failed: %w", runErr)
+		}
+		return nil
+	}
+
+	// Human mode: replace process
+	return runner.Exec(bin, args, injected)
+}
+
+// scopeSecrets returns the secrets to inject based on the policy.
+// In strict mode (agent), returns an error if no policy match is found.
+// In loose mode (human), warns and returns all secrets.
+func scopeSecrets(v *vault.Vault, bin string, args []string, strict bool) (map[string]string, error) {
+	all := v.EnvMap()
 
 	pol, err := policy.Load(v.Dir())
 	if err != nil || pol.IsEmpty() {
-		// No policy — inject all with warning
+		if strict {
+			return nil, fmt.Errorf("no policy file found. Run 'ghostenv init' or 'ghostenv policy add' to create one")
+		}
 		fmt.Fprintf(os.Stderr, "warning: no policy file found, injecting all secrets. Run 'ghostenv init' to generate one.\n")
-		return all
+		return all, nil
 	}
 
 	rule, matched := pol.Match(bin, args)
 	if !matched {
+		if strict {
+			return nil, fmt.Errorf("command %q is not in the policy allowlist. Run: ghostenv policy add %q", bin, bin+" "+strings.Join(args, " "))
+		}
 		fmt.Fprintf(os.Stderr, "warning: no policy rule matched %q, injecting all secrets.\n", bin)
-		return all
+		return all, nil
 	}
 
-	return rule.FilterSecrets(all)
+	return rule.FilterSecrets(all), nil
 }
 
 var diffCmd = &cobra.Command{
@@ -472,15 +503,6 @@ func splitLines(s string) []string {
 		lines = append(lines, s[start:])
 	}
 	return lines
-}
-
-var mcpCmd = &cobra.Command{
-	Use:   "mcp",
-	Short: "Start the MCP server",
-	Long:  "Starts the ghostenv MCP server for AI agent integration. Communicates over stdio using JSON-RPC.",
-	RunE: func(cmd *cobra.Command, args []string) error {
-		return mcpserver.Run()
-	},
 }
 
 var restoreStdout bool

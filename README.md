@@ -59,7 +59,8 @@ ghostenv run gh pr create
 | `ghostenv exec -- CMD` | Same as `run`, with explicit `--` separator |
 | `ghostenv policy show` | Show the current policy allowlist |
 | `ghostenv policy init` | Generate a starter policy from installed tools |
-| `ghostenv mcp` | Start the MCP server for AI agent integration |
+| `ghostenv policy add CMD [KEY...]` | Add a command to the policy allowlist |
+| `ghostenv policy remove CMD` | Remove a command from the policy |
 
 ## Shell completions
 
@@ -88,8 +89,8 @@ allow:
     inject: all
 ```
 
-- **CLI**: `ghostenv run` uses the policy for per-secret scoping. If no rule matches, all secrets are injected with a warning. Use `--all` to bypass.
-- **MCP server**: Strict enforcement. Commands not in the policy are rejected.
+- **Human**: `ghostenv run` uses the policy for per-secret scoping. If no rule matches, all secrets are injected with a warning. Use `--all` to bypass.
+- **AI agent**: When an agent is detected in the process tree, policy is strictly enforced — commands not in the policy are rejected, and output is scrubbed of any leaked secrets.
 
 ## Key storage
 
@@ -103,8 +104,8 @@ Force GPG with `GHOSTENV_BACKEND=gpg`. Set `GHOSTENV_GPG_KEY` to pick a specific
 - Master key never stored in plaintext
 - `ghostenv run` injects secrets into the child process only — they disappear when the process exits
 - Policy allowlist controls which commands can receive which secrets
-- MCP server scrubs command output for leaked secrets (including base64/hex/URL-encoded forms)
-- Process tree scanning blocks access when an AI agent is detected as a parent process
+- When an AI agent is detected, output is scrubbed for leaked secrets (including base64/hex/URL-encoded forms)
+- Process tree scanning auto-detects AI agents and switches to strict mode (policy enforced, output scrubbed)
 - Masked values are deterministic (stable across sessions) but not reversible
 - Each project has its own isolated vault
 

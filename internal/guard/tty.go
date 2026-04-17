@@ -22,14 +22,34 @@ var agentProcesses = []string{
 	"windsurf",
 }
 
-// Confirm gates access to secrets with platform-appropriate checks:
-//
-// All:    process tree check (hard block if AI agent detected)
-// macOS:  Touch ID (via ghostenv-keychain helper), or pass through (security CLI prompts)
-// Linux:  TTY check + "Press Enter" confirmation
+// IsAgent returns true if an AI agent is detected in the process tree.
+func IsAgent() bool {
+	pid := os.Getpid()
+
+	for range 32 {
+		ppid, name, err := parentProcess(pid)
+		if err != nil || ppid <= 1 {
+			break
+		}
+
+		nameLower := strings.ToLower(name)
+		for _, agent := range agentProcesses {
+			if strings.Contains(nameLower, agent) {
+				return true
+			}
+		}
+
+		pid = ppid
+	}
+
+	return false
+}
+
+// Confirm blocks agents entirely, then prompts humans for confirmation.
+// Use this for commands that reveal secret values (show, edit, restore).
 func Confirm() error {
-	if err := checkProcessTree(); err != nil {
-		return err
+	if IsAgent() {
+		return fmt.Errorf("blocked: this command cannot be run from an AI agent")
 	}
 
 	if runtime.GOOS == "darwin" {
@@ -84,30 +104,6 @@ func findHelper() (string, error) {
 		}
 	}
 	return exec.LookPath("ghostenv-keychain")
-}
-
-// checkProcessTree walks up the process tree and blocks if any ancestor
-// is a known AI agent.
-func checkProcessTree() error {
-	pid := os.Getpid()
-
-	for range 32 {
-		ppid, name, err := parentProcess(pid)
-		if err != nil || ppid <= 1 {
-			break
-		}
-
-		nameLower := strings.ToLower(name)
-		for _, agent := range agentProcesses {
-			if strings.Contains(nameLower, agent) {
-				return fmt.Errorf("blocked: detected AI agent %q in process tree (pid %d)", name, pid)
-			}
-		}
-
-		pid = ppid
-	}
-
-	return nil
 }
 
 func parentProcess(pid int) (int, string, error) {
