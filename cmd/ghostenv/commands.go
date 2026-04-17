@@ -110,9 +110,16 @@ var initCmd = &cobra.Command{
 			}
 		}
 
+		// Add ghostenv instructions to agent config files
+		addAgentInstructions()
+
 		fmt.Printf("Locked %d secrets from %s\n", imported, path)
 		fmt.Println("Original values are now in the vault.")
 		fmt.Println("The .env file now contains masked (fake) values.")
+		fmt.Println("\nNext steps:")
+		fmt.Println("  ghostenv run <command>       Run a command with real secrets")
+		fmt.Println("  ghostenv status              See stored keys and policy")
+		fmt.Println("  ghostenv policy add <cmd>    Allow a command for AI agents")
 		return nil
 	},
 }
@@ -145,6 +152,16 @@ var statusCmd = &cobra.Command{
 		if envFile != "" {
 			fmt.Printf("\nMasked env: %s\n", envFile)
 		}
+
+		// Show policy summary
+		pol, err := policy.Load(v.Dir())
+		if err == nil && !pol.IsEmpty() {
+			fmt.Printf("\nPolicy: %d rules\n", len(pol.Allow))
+			fmt.Print(pol.Format())
+		} else {
+			fmt.Println("\nPolicy: none (agents cannot run commands until rules are added)")
+		}
+
 		return nil
 	},
 }
@@ -474,6 +491,64 @@ func addToGitignore(entry string) {
 	}
 	content = append(content, []byte(entry+"\n")...)
 	os.WriteFile(path, content, 0644)
+}
+
+const ghostenvBlock = `
+# ghostenv
+.env values are masked (fake). Real secrets are in the encrypted vault.
+Use ` + "`ghostenv run <command>`" + ` to run commands that need secrets.
+Use ` + "`ghostenv policy add \"<command>\"`" + ` to allow new commands.
+Do NOT edit .env directly — it is managed by ghostenv.
+`
+
+// agentFiles maps agent config files to check/create.
+// Order matters: first existing file wins for the "created" message.
+var agentFiles = []struct {
+	path string
+	name string
+}{
+	{"CLAUDE.md", "Claude Code"},
+	{"AGENTS.md", "Codex"},
+	{".cursorrules", "Cursor"},
+	{".windsurfrules", "Windsurf"},
+	{".github/copilot-instructions.md", "Copilot"},
+}
+
+// addAgentInstructions appends ghostenv instructions to all existing agent
+// config files. If none exist, creates CLAUDE.md as the default.
+func addAgentInstructions() {
+	found := false
+	for _, af := range agentFiles {
+		content, err := os.ReadFile(af.path)
+		if err != nil {
+			continue
+		}
+		// Already has ghostenv block
+		if strings.Contains(string(content), "# ghostenv") {
+			found = true
+			continue
+		}
+		// Append
+		if len(content) > 0 && content[len(content)-1] != '\n' {
+			content = append(content, '\n')
+		}
+		content = append(content, []byte(ghostenvBlock)...)
+		if err := os.WriteFile(af.path, content, 0644); err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: could not update %s: %v\n", af.path, err)
+			continue
+		}
+		fmt.Printf("Updated %s with ghostenv instructions\n", af.path)
+		found = true
+	}
+
+	// No agent files found — create CLAUDE.md
+	if !found {
+		if err := os.WriteFile("CLAUDE.md", []byte(strings.TrimLeft(ghostenvBlock, "\n")), 0644); err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: could not create CLAUDE.md: %v\n", err)
+			return
+		}
+		fmt.Println("Created CLAUDE.md with ghostenv instructions")
+	}
 }
 
 func splitLines(s string) []string {
