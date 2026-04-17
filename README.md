@@ -9,6 +9,7 @@ ghostenv locks your `.env` secrets in an encrypted vault and replaces them with 
 1. Your real secrets get encrypted and stored in a per-project vault (`.ghostenv/`)
 2. Your `.env` file gets replaced with fake values like `gv_YZXELQYXBPKJNIX2`
 3. When you run a command through `ghostenv run`, real secrets are injected into that process only — they never touch your shell environment
+4. AI agents are auto-detected — they get strict policy enforcement and scrubbed output
 
 ## Install
 
@@ -40,20 +41,27 @@ cat .env
 # Run commands with real secrets injected
 ghostenv run npm publish
 ghostenv run gh pr create
+
+# See everything at a glance
+ghostenv status
 ```
+
+`ghostenv init` also:
+- Generates a starter policy from tools found in your PATH
+- Adds instructions to agent config files (`CLAUDE.md`, `AGENTS.md`, `.cursorrules`, `.windsurfrules`, `.github/copilot-instructions.md`) — or creates `CLAUDE.md` if none exist
+- Adds `.ghostenv/` to `.gitignore`
 
 ## Commands
 
 | Command | Description |
 |---|---|
 | `ghostenv init [file]` | Import secrets from a `.env` file into the vault |
-| `ghostenv status` | Show stored keys and when they were set |
+| `ghostenv status` | Show stored keys, policy, and masked env path |
 | `ghostenv show [key]` | View real secret values |
 | `ghostenv set KEY VALUE` | Add or update a secret |
 | `ghostenv edit` | Edit all secrets in your `$EDITOR` |
 | `ghostenv remove KEY` | Remove a secret from the vault |
 | `ghostenv run CMD` | Run a command with real secrets injected |
-| `ghostenv run --all CMD` | Run a command, injecting all secrets (ignore policy) |
 | `ghostenv restore` | Write real secrets back to `.env` (undo masking) |
 | `ghostenv diff` | Show differences between vault and masked `.env` |
 | `ghostenv exec -- CMD` | Same as `run`, with explicit `--` separator |
@@ -61,6 +69,42 @@ ghostenv run gh pr create
 | `ghostenv policy init` | Generate a starter policy from installed tools |
 | `ghostenv policy add CMD [KEY...]` | Add a command to the policy allowlist |
 | `ghostenv policy remove CMD` | Remove a command from the policy |
+
+## AI agent integration
+
+ghostenv auto-detects AI agents (Claude, Codex, Cursor, Copilot, etc.) in the process tree and switches behavior:
+
+| | Human | AI agent |
+|---|---|---|
+| `ghostenv run` | All secrets injected, no questions | Policy enforced — must match allowlist |
+| `ghostenv show` | Prompts for confirmation | Blocked |
+| `ghostenv edit` | Opens `$EDITOR` | Blocked |
+| Command output | Passed through directly | Scrubbed for leaked secrets |
+
+Agents discover ghostenv through the `.env` comments and the `CLAUDE.md` / agent config files created during init. They don't need to read this README.
+
+## Policy
+
+The policy file (`.ghostenv/policy.yaml`) controls what AI agents can do. It has no effect on humans — you always get all your secrets.
+
+```yaml
+allow:
+  - command: "npm publish"
+    inject: [NPM_TOKEN]
+  - command: "gh *"
+    inject: [GITHUB_TOKEN]
+  - command: "docker push *"
+    inject: all
+```
+
+A starter policy is auto-generated during `ghostenv init` based on tools in your PATH. Manage it with:
+
+```bash
+ghostenv policy add "npm publish" NPM_TOKEN
+ghostenv policy add "docker push *"          # defaults to all secrets
+ghostenv policy remove "npm publish"
+ghostenv policy show
+```
 
 ## Shell completions
 
@@ -75,23 +119,6 @@ ghostenv completion bash >> ~/.bashrc
 ghostenv completion fish > ~/.config/fish/completions/ghostenv.fish
 ```
 
-## Policy
-
-ghostenv uses a policy file (`.ghostenv/policy.yaml`) to control which commands receive which secrets. A starter policy is auto-generated during `ghostenv init` based on tools found in your PATH.
-
-```yaml
-allow:
-  - command: "npm publish"
-    inject: [NPM_TOKEN]
-  - command: "gh *"
-    inject: [GITHUB_TOKEN]
-  - command: "docker push *"
-    inject: all
-```
-
-- **Human**: `ghostenv run` uses the policy for per-secret scoping. If no rule matches, all secrets are injected with a warning. Use `--all` to bypass.
-- **AI agent**: When an agent is detected in the process tree, policy is strictly enforced — commands not in the policy are rejected, and output is scrubbed of any leaked secrets.
-
 ## Key storage
 
 The vault master key is stored in the OS keychain (macOS) or via `secret-tool` (Linux). On Linux, if `secret-tool` is unavailable, ghostenv falls back to GPG automatically.
@@ -101,11 +128,11 @@ Force GPG with `GHOSTENV_BACKEND=gpg`. Set `GHOSTENV_GPG_KEY` to pick a specific
 ## Security model
 
 - Secrets are encrypted at rest with AES-256-GCM
-- Master key never stored in plaintext
+- Master key stored in OS keychain, never in plaintext
 - `ghostenv run` injects secrets into the child process only — they disappear when the process exits
-- Policy allowlist controls which commands can receive which secrets
-- When an AI agent is detected, output is scrubbed for leaked secrets (including base64/hex/URL-encoded forms)
-- Process tree scanning auto-detects AI agents and switches to strict mode (policy enforced, output scrubbed)
+- AI agents are auto-detected via process tree scanning
+- Agent mode: policy enforced, output scrubbed (base64/hex/URL-encoded forms caught)
+- Human mode: all secrets injected, no friction
 - Masked values are deterministic (stable across sessions) but not reversible
 - Each project has its own isolated vault
 
