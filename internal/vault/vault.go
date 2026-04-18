@@ -149,7 +149,9 @@ func Open() (*Vault, error) {
 
 	// Load config if present
 	if data, err := os.ReadFile(v.configPath); err == nil {
-		json.Unmarshal(data, &v.config)
+		if err := json.Unmarshal(data, &v.config); err != nil {
+			return nil, fmt.Errorf("could not parse vault config: %w", err)
+		}
 	}
 
 	return v, nil
@@ -194,7 +196,11 @@ func (v *Vault) MasterKey() []byte {
 }
 
 // SetEnvFile records which .env file this vault manages.
+// Stores the absolute path so it works from any subdirectory.
 func (v *Vault) SetEnvFile(path string) {
+	if abs, err := filepath.Abs(path); err == nil {
+		path = abs
+	}
 	v.config.EnvFile = path
 }
 
@@ -267,6 +273,7 @@ func (v *Vault) EnvMap() map[string]string {
 }
 
 // Save encrypts and writes the vault and config to disk.
+// Uses atomic writes (temp file + rename) to prevent corruption on crash.
 func (v *Vault) Save() error {
 	plaintext, err := json.Marshal(v.secrets)
 	if err != nil {
@@ -289,7 +296,7 @@ func (v *Vault) Save() error {
 	}
 
 	ciphertext := gcm.Seal(nonce, nonce, plaintext, nil)
-	if err := os.WriteFile(v.path, ciphertext, 0600); err != nil {
+	if err := atomicWrite(v.path, ciphertext, 0600); err != nil {
 		return err
 	}
 
@@ -298,7 +305,33 @@ func (v *Vault) Save() error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(v.configPath, configData, 0644)
+	return atomicWrite(v.configPath, configData, 0644)
+}
+
+// atomicWrite writes data to a temp file in the same directory, then renames
+// it to the target path. This prevents partial writes on crash.
+func atomicWrite(path string, data []byte, perm os.FileMode) error {
+	dir := filepath.Dir(path)
+	tmp, err := os.CreateTemp(dir, ".ghostenv-tmp-*")
+	if err != nil {
+		return err
+	}
+	tmpPath := tmp.Name()
+
+	if _, err := tmp.Write(data); err != nil {
+		tmp.Close()
+		os.Remove(tmpPath)
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		os.Remove(tmpPath)
+		return err
+	}
+	if err := os.Chmod(tmpPath, perm); err != nil {
+		os.Remove(tmpPath)
+		return err
+	}
+	return os.Rename(tmpPath, path)
 }
 
 // load decrypts and reads the vault from disk.

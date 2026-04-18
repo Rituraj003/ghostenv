@@ -170,8 +170,10 @@ func TestSaveAndReopen(t *testing.T) {
 		t.Errorf("after reopen: expected myvalue, got %q (ok=%v)", val, ok)
 	}
 
-	if v2.EnvFile() != ".env" {
-		t.Errorf("expected env file .env, got %q", v2.EnvFile())
+	// EnvFile is stored as absolute path
+	envFile := v2.EnvFile()
+	if envFile == "" || envFile == ".env" {
+		t.Errorf("expected absolute env file path, got %q", envFile)
 	}
 }
 

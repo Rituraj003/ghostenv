@@ -76,8 +76,7 @@ func Delete(account string, vaultDir string) error {
 		).Run()
 
 	case "linux":
-		return exec.Command("secret-tool", "store",
-			"--label", "ghostenv master key (deleted)",
+		return exec.Command("secret-tool", "clear",
 			"service", service, "account", account,
 		).Run()
 
