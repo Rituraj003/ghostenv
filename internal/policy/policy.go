@@ -49,7 +49,12 @@ func (p *Policy) Save(dir string) error {
 
 	header := "# ghostenv policy — commands allowed to receive secrets\n" +
 		"# Edit this file to control which commands can access your secrets.\n" +
-		"# Use 'inject: all' to inject every secret, or list specific key names.\n\n"
+		"# Use 'inject: all' to inject every secret, or list specific key names.\n" +
+		"#\n" +
+		"# Matching rules:\n" +
+		"#   'gh'             — bare name matches all subcommands (gh pr view, gh issue list, etc.)\n" +
+		"#   'npm publish'    — matches npm publish and any extra flags (npm publish --tag beta)\n" +
+		"#   'docker push *'  — matches docker push <something> (requires at least one arg after push)\n\n"
 
 	return os.WriteFile(filepath.Join(dir, "policy.yaml"), []byte(header+string(data)), 0644)
 }
@@ -111,7 +116,8 @@ func (r *Rule) match(bin string, args []string) bool {
 		}
 	}
 
-	// All pattern tokens matched; args can have extra trailing args
+	// All pattern tokens matched; extra trailing args are allowed
+	// (e.g. "npm publish" also matches "npm publish --tag beta")
 	return true
 }
 

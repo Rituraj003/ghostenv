@@ -170,6 +170,35 @@ func Open() (*Vault, error) {
 	return v, nil
 }
 
+// LoadKeychainKey reads the current master key from the OS keychain for the
+// vault in the current directory. Used to back up the key before operations
+// that might overwrite it (like init --force).
+func LoadKeychainKey() ([]byte, error) {
+	cwd, err := os.Getwd()
+	if err != nil {
+		return nil, err
+	}
+	if resolved, err := filepath.EvalSymlinks(cwd); err == nil {
+		cwd = resolved
+	}
+	dir := filepath.Join(cwd, ".ghostenv")
+	return keychain.Load(keychainAccount(dir), dir)
+}
+
+// RestoreKeychainKey writes a master key back to the OS keychain for the
+// vault in the current directory. Used to roll back after a failed init --force.
+func RestoreKeychainKey(key []byte) error {
+	cwd, err := os.Getwd()
+	if err != nil {
+		return err
+	}
+	if resolved, err := filepath.EvalSymlinks(cwd); err == nil {
+		cwd = resolved
+	}
+	dir := filepath.Join(cwd, ".ghostenv")
+	return keychain.Store(keychainAccount(dir), key, dir)
+}
+
 // Destroy removes the vault directory and its keychain entry.
 func Destroy() {
 	cwd, err := os.Getwd()

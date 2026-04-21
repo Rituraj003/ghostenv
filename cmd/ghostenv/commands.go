@@ -60,19 +60,28 @@ var initCmd = &cobra.Command{
 			return fmt.Errorf("vault already exists. Use --force to reimport, or 'ghostenv set' to update individual secrets")
 		}
 		var backupDir string
+		var oldKeychainKey []byte
 		if vault.ExistsInCwd() && forceInit {
-			// Preserve existing secrets before destroying
+			// Preserve existing secrets and keychain key before destroying
 			if oldVault, err := vault.Open(); err == nil {
 				oldSecrets = oldVault.EnvMap()
 			}
-			// Rename old vault aside, init new one, then clean up
-			cwd, _ := os.Getwd()
+			oldKeychainKey, _ = vault.LoadKeychainKey()
+
+			// Rename old vault aside, init new one
+			cwd, err := os.Getwd()
+			if err != nil {
+				return fmt.Errorf("could not determine working directory: %w", err)
+			}
 			backupDir = cwd + "/.ghostenv.bak"
 			os.Rename(cwd+"/.ghostenv", backupDir)
 			v, err = vault.Init()
 			if err != nil {
-				// Restore old vault on failure
+				// Restore old vault and keychain key on failure
 				os.Rename(backupDir, cwd+"/.ghostenv")
+				if oldKeychainKey != nil {
+					vault.RestoreKeychainKey(oldKeychainKey)
+				}
 				return fmt.Errorf("could not reinitialize vault: %w", err)
 			}
 		} else {
@@ -98,6 +107,15 @@ var initCmd = &cobra.Command{
 
 		v.SetEnvFile(path)
 		if err := v.Save(); err != nil {
+			// Restore old vault and keychain key on save failure
+			if backupDir != "" {
+				vaultDir := strings.TrimSuffix(backupDir, ".bak")
+				os.RemoveAll(vaultDir)
+				os.Rename(backupDir, vaultDir)
+				if oldKeychainKey != nil {
+					vault.RestoreKeychainKey(oldKeychainKey)
+				}
+			}
 			return fmt.Errorf("could not save vault: %w", err)
 		}
 
