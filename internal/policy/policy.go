@@ -99,9 +99,9 @@ func (r *Rule) match(bin string, args []string) bool {
 
 	// Match positionally
 	for i, pat := range pattern {
-		// Trailing * matches any remaining args
+		// Trailing * matches one or more remaining args
 		if pat == "*" && i == len(pattern)-1 {
-			return len(args) >= i
+			return len(args) > i
 		}
 		if i >= len(args) {
 			return false

@@ -70,7 +70,11 @@ func Format(pairs []KeyValue) string {
 
 func stripQuotes(s string) string {
 	if len(s) >= 2 {
-		if (s[0] == '"' && s[len(s)-1] == '"') || (s[0] == '\'' && s[len(s)-1] == '\'') {
+		if s[0] == '"' && s[len(s)-1] == '"' {
+			// Unescape backslash-escaped quotes inside double-quoted values
+			return strings.ReplaceAll(s[1:len(s)-1], "\\\"", "\"")
+		}
+		if s[0] == '\'' && s[len(s)-1] == '\'' {
 			return s[1 : len(s)-1]
 		}
 	}

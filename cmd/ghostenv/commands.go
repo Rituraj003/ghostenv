@@ -60,12 +60,21 @@ var initCmd = &cobra.Command{
 			return fmt.Errorf("vault already exists. Use --force to reimport, or 'ghostenv set' to update individual secrets")
 		}
 		if vault.ExistsInCwd() && forceInit {
-			// Try to preserve existing secrets from old vault
+			// Preserve existing secrets before destroying
 			if oldVault, err := vault.Open(); err == nil {
 				oldSecrets = oldVault.EnvMap()
 			}
-			vault.Destroy()
+			// Rename old vault aside, init new one, then clean up
+			cwd, _ := os.Getwd()
+			backupDir := cwd + "/.ghostenv.bak"
+			os.Rename(cwd+"/.ghostenv", backupDir)
 			v, err = vault.Init()
+			if err != nil {
+				// Restore old vault on failure
+				os.Rename(backupDir, cwd+"/.ghostenv")
+				return fmt.Errorf("could not reinitialize vault: %w", err)
+			}
+			os.RemoveAll(backupDir)
 		} else {
 			v, err = vault.Init()
 		}
@@ -351,7 +360,10 @@ func runWithSecrets(bin string, args []string, injectAll bool) error {
 	allSecrets := v.EnvMap()
 	var injected map[string]string
 
-	if agentMode && !injectAll {
+	if agentMode {
+		if injectAll {
+			return fmt.Errorf("--all is not allowed when running from an AI agent")
+		}
 		injected, err = scopeSecrets(v, bin, args)
 		if err != nil {
 			return err

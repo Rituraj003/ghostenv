@@ -83,6 +83,36 @@ func TestFormat(t *testing.T) {
 	}
 }
 
+func TestFormatParseRoundTrip(t *testing.T) {
+	pairs := []KeyValue{
+		{"SIMPLE", "value"},
+		{"WITH_QUOTES", `say "hello"`},
+		{"WITH_SPACES", "hello world"},
+		{"EMPTY", ""},
+	}
+
+	formatted := Format(pairs)
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, ".env")
+	os.WriteFile(path, []byte(formatted), 0644)
+
+	parsed, err := Parse(path)
+	if err != nil {
+		t.Fatalf("Parse failed: %v", err)
+	}
+
+	if len(parsed) != len(pairs) {
+		t.Fatalf("expected %d pairs, got %d", len(pairs), len(parsed))
+	}
+
+	for i, kv := range parsed {
+		if kv.Key != pairs[i].Key || kv.Value != pairs[i].Value {
+			t.Errorf("round-trip pair %d: expected %s=%q, got %s=%q", i, pairs[i].Key, pairs[i].Value, kv.Key, kv.Value)
+		}
+	}
+}
+
 func TestParseFileNotFound(t *testing.T) {
 	_, err := Parse("/nonexistent/path/.env")
 	if err == nil {
