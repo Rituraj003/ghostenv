@@ -485,7 +485,10 @@ func addToGitignore(entry string) {
 	content, err := os.ReadFile(path)
 	if err != nil {
 		// No .gitignore, create one
-		os.WriteFile(path, []byte(entry+"\n"), 0644)
+		if err := os.WriteFile(path, []byte(entry+"\n"), 0644); err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: could not create .gitignore: %v\n", err)
+			fmt.Fprintf(os.Stderr, "Add %q to .gitignore manually to avoid committing the vault.\n", entry)
+		}
 		return
 	}
 
@@ -502,7 +505,10 @@ func addToGitignore(entry string) {
 		content = append(content, '\n')
 	}
 	content = append(content, []byte(entry+"\n")...)
-	os.WriteFile(path, content, 0644)
+	if err := os.WriteFile(path, content, 0644); err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: could not update .gitignore: %v\n", err)
+		fmt.Fprintf(os.Stderr, "Add %q to .gitignore manually to avoid committing the vault.\n", entry)
+	}
 }
 
 const ghostenvBlock = `
