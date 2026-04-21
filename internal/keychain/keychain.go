@@ -11,8 +11,8 @@ import (
 const service = "ghostenv"
 
 // Store saves the master key to the OS keychain or GPG.
-// On macOS, always uses the security CLI with -A flag so any process can read
-// without prompting. Touch ID protection is enforced on Load, not Store.
+// On macOS, uses the security CLI with default access controls.
+// Touch ID protection is handled separately by the guard package.
 func Store(account string, key []byte, vaultDir string) error {
 	encoded := hex.EncodeToString(key)
 
@@ -85,12 +85,13 @@ func Delete(account string, vaultDir string) error {
 	}
 }
 
-// Fallback: plain security command (no Touch ID protection)
+// storeFallback uses the macOS security CLI to store the key.
+// Without -A, macOS prompts the user when a new application tries to access
+// the entry, providing one more barrier against local secret extraction.
 func storeFallback(account, encoded string) error {
 	exec.Command("security", "delete-generic-password", "-s", service, "-a", account).Run()
-	// -A allows any application to access without prompting
 	return exec.Command("security", "add-generic-password",
-		"-s", service, "-a", account, "-w", encoded, "-A",
+		"-s", service, "-a", account, "-w", encoded,
 	).Run()
 }
 
