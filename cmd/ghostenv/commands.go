@@ -486,19 +486,17 @@ var diffCmd = &cobra.Command{
 }
 
 // regenMaskedEnv regenerates the masked .env file from the current vault state.
+// Preserves comments and blank lines from the original file.
 func regenMaskedEnv(v *vault.Vault) error {
 	envFile := v.EnvFile()
 	if envFile == "" {
 		return nil
 	}
 
-	pairs := v.Pairs()
-	var kvs []envfile.KeyValue
-	for _, p := range pairs {
-		kvs = append(kvs, envfile.KeyValue{Key: p.Key, Value: p.Value})
+	masked, err := mask.GenerateFromFile(v.MasterKey(), envFile, v.EnvMap())
+	if err != nil {
+		return err
 	}
-
-	masked := mask.Generate(v.MasterKey(), kvs)
 	return os.WriteFile(envFile, []byte(masked), 0644)
 }
 
