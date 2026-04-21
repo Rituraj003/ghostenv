@@ -161,8 +161,12 @@ func IsBlocked(command string) bool {
 
 // Add appends a rule to the policy. Returns an error if the command is blocked.
 func (p *Policy) Add(command string, inject []string) error {
+	tokens := strings.Fields(command)
+	if len(tokens) == 0 {
+		return fmt.Errorf("command cannot be empty")
+	}
 	if IsBlocked(command) {
-		return fmt.Errorf("command %q is blocked — shells and generic runtimes cannot receive secrets", strings.Fields(command)[0])
+		return fmt.Errorf("command %q is blocked — shells and generic runtimes cannot receive secrets", tokens[0])
 	}
 
 	// Check for duplicate

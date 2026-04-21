@@ -15,6 +15,8 @@ SIMPLE=value
 QUOTED="hello world"
 SINGLE_QUOTED='another value'
 EMPTY=
+INLINE_COMMENT=secret123 # this is a comment
+QUOTED_HASH="value with # hash"
 
 # Another comment
 SPACED_KEY = spaced_value
@@ -31,6 +33,8 @@ SPACED_KEY = spaced_value
 		{"QUOTED", "hello world"},
 		{"SINGLE_QUOTED", "another value"},
 		{"EMPTY", ""},
+		{"INLINE_COMMENT", "secret123"},
+		{"QUOTED_HASH", "value with # hash"},
 		{"SPACED_KEY", "spaced_value"},
 	}
 

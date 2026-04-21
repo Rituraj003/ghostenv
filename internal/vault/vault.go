@@ -50,6 +50,10 @@ func findProjectDir() string {
 	if err != nil {
 		return ""
 	}
+	// Resolve symlinks so the keychain account hash is path-stable
+	if resolved, err := filepath.EvalSymlinks(dir); err == nil {
+		dir = resolved
+	}
 	for {
 		candidate := filepath.Join(dir, ".ghostenv")
 		if info, err := os.Stat(candidate); err == nil && info.IsDir() {
@@ -76,6 +80,9 @@ func Init() (*Vault, error) {
 	cwd, err := os.Getwd()
 	if err != nil {
 		return nil, err
+	}
+	if resolved, err := filepath.EvalSymlinks(cwd); err == nil {
+		cwd = resolved
 	}
 	dir := filepath.Join(cwd, ".ghostenv")
 
@@ -141,16 +148,22 @@ func Open() (*Vault, error) {
 	v.masterKey = keyData
 
 	// Load existing vault if present
+	vaultExists := false
 	if _, err := os.Stat(v.path); err == nil {
 		if err := v.load(); err != nil {
 			return nil, fmt.Errorf("could not load vault: %w", err)
 		}
+		vaultExists = true
 	}
 
 	// Load config if present
 	if data, err := os.ReadFile(v.configPath); err == nil {
 		if err := json.Unmarshal(data, &v.config); err != nil {
 			return nil, fmt.Errorf("could not parse vault config: %w", err)
+		}
+		// Config exists but vault.enc is missing — likely corrupted
+		if !vaultExists {
+			return nil, fmt.Errorf("vault.enc is missing but config.json exists — vault may be corrupted. Check .ghostenv/ directory")
 		}
 	}
 

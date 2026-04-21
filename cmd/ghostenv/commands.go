@@ -59,6 +59,7 @@ var initCmd = &cobra.Command{
 		if vault.ExistsInCwd() && !forceInit {
 			return fmt.Errorf("vault already exists. Use --force to reimport, or 'ghostenv set' to update individual secrets")
 		}
+		var backupDir string
 		if vault.ExistsInCwd() && forceInit {
 			// Preserve existing secrets before destroying
 			if oldVault, err := vault.Open(); err == nil {
@@ -66,7 +67,7 @@ var initCmd = &cobra.Command{
 			}
 			// Rename old vault aside, init new one, then clean up
 			cwd, _ := os.Getwd()
-			backupDir := cwd + "/.ghostenv.bak"
+			backupDir = cwd + "/.ghostenv.bak"
 			os.Rename(cwd+"/.ghostenv", backupDir)
 			v, err = vault.Init()
 			if err != nil {
@@ -74,7 +75,6 @@ var initCmd = &cobra.Command{
 				os.Rename(backupDir, cwd+"/.ghostenv")
 				return fmt.Errorf("could not reinitialize vault: %w", err)
 			}
-			os.RemoveAll(backupDir)
 		} else {
 			v, err = vault.Init()
 		}
@@ -99,6 +99,11 @@ var initCmd = &cobra.Command{
 		v.SetEnvFile(path)
 		if err := v.Save(); err != nil {
 			return fmt.Errorf("could not save vault: %w", err)
+		}
+
+		// Clean up backup now that save succeeded
+		if backupDir != "" {
+			os.RemoveAll(backupDir)
 		}
 
 		// Generate masked .env

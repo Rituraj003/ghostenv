@@ -200,6 +200,16 @@ func TestGenerateStarter(t *testing.T) {
 	_ = p.IsEmpty() // may or may not have rules depending on what's installed
 }
 
+func TestAddEmpty(t *testing.T) {
+	p := &Policy{}
+	if err := p.Add("", []string{"all"}); err == nil {
+		t.Fatal("expected error for empty command")
+	}
+	if err := p.Add("   ", []string{"all"}); err == nil {
+		t.Fatal("expected error for whitespace-only command")
+	}
+}
+
 func TestFormat(t *testing.T) {
 	p := &Policy{
 		Allow: []Rule{

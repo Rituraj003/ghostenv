@@ -41,6 +41,13 @@ func Parse(path string) ([]KeyValue, error) {
 		key := strings.TrimSpace(line[:idx])
 		value := strings.TrimSpace(line[idx+1:])
 
+		// Strip inline comments from unquoted values
+		if len(value) > 0 && value[0] != '"' && value[0] != '\'' {
+			if ci := strings.IndexByte(value, '#'); ci >= 0 {
+				value = strings.TrimSpace(value[:ci])
+			}
+		}
+
 		// Strip surrounding quotes from value
 		value = stripQuotes(value)
 
