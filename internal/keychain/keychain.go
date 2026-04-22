@@ -10,12 +10,15 @@ import (
 
 const service = "ghostenv"
 
-// Store saves the master key to the OS keychain or GPG.
+// Store saves the master key to the OS keychain, GPG, or password-encrypted file.
 // On macOS, uses the security CLI with default access controls.
-// Touch ID protection is handled separately by the guard package.
+// On Linux, tries secret-tool, then GPG, then password-based file encryption.
 func Store(account string, key []byte, vaultDir string) error {
 	encoded := hex.EncodeToString(key)
 
+	if usePassword() {
+		return passwordStore(vaultDir, encoded)
+	}
 	if useGPG() {
 		return gpgStore(vaultDir, encoded)
 	}
@@ -37,10 +40,11 @@ func Store(account string, key []byte, vaultDir string) error {
 	}
 }
 
-// Load retrieves the master key from the OS keychain or GPG.
-// On macOS, always uses the security CLI for consistency with Store.
-// Touch ID authentication is handled separately by the guard package.
+// Load retrieves the master key from the OS keychain, GPG, or password-encrypted file.
 func Load(account string, vaultDir string) ([]byte, error) {
+	if usePassword() {
+		return passwordLoad(vaultDir)
+	}
 	if useGPG() {
 		return gpgLoad(vaultDir)
 	}
@@ -63,8 +67,11 @@ func Load(account string, vaultDir string) ([]byte, error) {
 	}
 }
 
-// Delete removes the master key from the OS keychain or GPG.
+// Delete removes the master key from the OS keychain, GPG, or password-encrypted file.
 func Delete(account string, vaultDir string) error {
+	if usePassword() {
+		return passwordDelete(vaultDir)
+	}
 	if useGPG() {
 		return gpgDelete(vaultDir)
 	}

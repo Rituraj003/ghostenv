@@ -133,7 +133,7 @@ ghostenv policy show
 ## Security model
 
 - Secrets encrypted at rest with AES-256-GCM
-- Master key stored in OS keychain (macOS) or `secret-tool` / GPG (Linux), never in plaintext
+- Master key stored in OS keychain (macOS), `secret-tool` / GPG / password-encrypted file (Linux)
 - Vault writes are atomic (temp file + rename) to prevent corruption
 - Real secrets appear only inside the command that needs them, then disappear when it exits
 - Agent mode: policy enforced, output scrubbed (base64, hex, and URL-encoded forms caught)
