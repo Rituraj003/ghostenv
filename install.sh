@@ -5,7 +5,6 @@ set -e
 # Usage: curl -sL https://raw.githubusercontent.com/Rituraj003/ghostenv/main/install.sh | sh
 
 REPO="Rituraj003/ghostenv"
-INSTALL_DIR="/usr/local/bin"
 
 # Detect OS
 OS="$(uname -s)"
@@ -22,6 +21,14 @@ case "$ARCH" in
     arm64|aarch64) ARCH="arm64" ;;
     *)             echo "Unsupported architecture: $ARCH"; exit 1 ;;
 esac
+
+# Pick install directory: writable /usr/local/bin, else ~/.local/bin
+if [ -w "/usr/local/bin" ]; then
+    INSTALL_DIR="/usr/local/bin"
+else
+    INSTALL_DIR="$HOME/.local/bin"
+    mkdir -p "$INSTALL_DIR"
+fi
 
 # Get latest version
 VERSION="$(curl -sI "https://github.com/$REPO/releases/latest" | grep -i '^location:' | sed 's/.*tag\///' | tr -d '\r\n')"
@@ -43,16 +50,14 @@ curl -sL "$URL" -o "$TMP/$FILENAME"
 tar xzf "$TMP/$FILENAME" -C "$TMP"
 
 # Install
-if [ -w "$INSTALL_DIR" ]; then
-    cp "$TMP/ghostenv" "$INSTALL_DIR/ghostenv"
-    [ -f "$TMP/ghostenv-keychain" ] && cp "$TMP/ghostenv-keychain" "$INSTALL_DIR/ghostenv-keychain"
-else
-    echo "Need sudo to install to $INSTALL_DIR"
-    sudo cp "$TMP/ghostenv" "$INSTALL_DIR/ghostenv"
-    [ -f "$TMP/ghostenv-keychain" ] && sudo cp "$TMP/ghostenv-keychain" "$INSTALL_DIR/ghostenv-keychain"
-fi
-
+cp "$TMP/ghostenv" "$INSTALL_DIR/ghostenv"
 chmod +x "$INSTALL_DIR/ghostenv"
-[ -f "$INSTALL_DIR/ghostenv-keychain" ] && chmod +x "$INSTALL_DIR/ghostenv-keychain"
+[ -f "$TMP/ghostenv-keychain" ] && cp "$TMP/ghostenv-keychain" "$INSTALL_DIR/ghostenv-keychain" && chmod +x "$INSTALL_DIR/ghostenv-keychain"
 
 echo "ghostenv $VERSION installed to $INSTALL_DIR/ghostenv"
+
+# Check if install dir is in PATH
+case ":$PATH:" in
+    *":$INSTALL_DIR:"*) ;;
+    *) echo "Add $INSTALL_DIR to your PATH: export PATH=\"$INSTALL_DIR:\$PATH\"" ;;
+esac
