@@ -35,6 +35,11 @@ Your agent sees the keys. It never sees the secrets.
 
 ## Install
 
+**Quick install** (macOS/Linux):
+```bash
+curl -sL https://raw.githubusercontent.com/Rituraj003/ghostenv/main/install.sh | sh
+```
+
 **Homebrew** (macOS/Linux):
 ```bash
 brew install Rituraj003/tap/ghostenv
